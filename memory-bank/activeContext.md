@@ -6,11 +6,11 @@
 
 **On master (`30cd84d87`):**
 - All Phases 1–4 of W2 (`copilot/W2_IMPLEMENTATION.md`).
-- W2 Surprise Challenge: dashboard port itself stayed on `feat/dashboard-modernize`, but the **integration with OpenEMR's patient finder shipped on master** (commits `0a49d038d`, `4b9f181a2`, `ad40380f3`, `cbeb2f03d`, `1d71642ec`, `77e4032fc`, `a0fa9b252`, `0e29e0aac`). Pattern documented as B14 in `systemPatterns.md`. A finder click in OpenEMR now lands on the modern dashboard for the right patient, with EHR-launch silent SSO.
+- W2 Surprise Challenge: dashboard port itself stayed on `feat/dashboard-modernize`. Master has the patient-finder re-point + dashboard.php launcher commits (`0a49d038d`, `4b9f181a2`, `ad40380f3`, `cbeb2f03d`, `1d71642ec`, `77e4032fc`, `a0fa9b252`, `0e29e0aac`). At master tip, the dashboard is configured as a separate Railway service (B14 v1) with cross-origin cookie/CSP gymnastics.
 - W2 Final partial: Cost & Latency Report (`30cd84d87`) — `copilot/COST.md` §§8-9 backed by live Railway p50/p95 data captured via `copilot/scripts/bench_latency.py`.
 - Bug-class fixes between `35b7d1d7f` and `30cd84d87`: confirm/reject closure mutation, bbox overlay tightening (multi-token snap, row expansion, OCR re-snap on cache hit), `.gitignore` for `.night-shift/` + `.claude/`. None of these introduce new architectural surface.
 
-**On `feat/dashboard-modernize` (`2cedf50d6`):** the dashboard port itself plus 52 sync/fix commits over master (notably frontend cookie `SameSite=None`/`Secure` fixes for prod iframe-embed and CSP `frame-ancestors` hardcoded fallback for prod). **Not yet pushed/merged** — user owns this.
+**On `feat/dashboard-modernize` (`2cedf50d6`) — architecture in active iteration:** the dashboard port itself plus 52 commits over master. **The branch has pivoted from the cross-origin separate-service architecture (B14 v1) to a same-origin co-resident architecture (B14 v2)** where the Next.js dashboard is built into the same OpenEMR Apache container and served via `mod_proxy_http` at `/modern/*`. Multi-stage `Dockerfile` builds `frontend/` → `.next/standalone` and drops it into `/opt/dashboard`; `dashboard-proxy.conf` forwards `/modern/*` → `127.0.0.1:3000`; Next.js uses `basePath: "/modern"`. This obviates the cross-origin workarounds (CSP frame-ancestors allowlist, SameSite=None cookies, upstream session-cookie samesite-Lax flip). User is **still debugging** this architecture — treat documented details as the as-coded snapshot, not as confirmed working. Branch is **not yet pushed/merged** — user owns the merge.
 
 **Outstanding for W2 Final (Sun 2026-05-10 noon CT):**
 1. **3-5 min demo video** — user owns capture.

@@ -9,8 +9,8 @@
 
 ## TL;DR (status as of 2026-05-09 — memory bank refresh)
 
-- **Master tip:** `30cd84d87` (W2 Final Cost & Latency Report). 83 commits ahead of W2 MVP `78d0672c7`; 23 commits ahead of last documented Phase 4 tip `35b7d1d7f`.
-- **Dashboard branch:** `feat/dashboard-modernize` at `2cedf50d6` — 52 commits ahead of master (port + master-sync + prod cookie/CSP fixes). Not yet pushed/merged.
+- **Master tip:** `30cd84d87` (W2 Final Cost & Latency Report). 83 commits ahead of W2 MVP `78d0672c7`; 23 commits ahead of last documented Phase 4 tip `35b7d1d7f`. Master holds **B14 v1** (cross-origin separate Railway service).
+- **Dashboard branch:** `feat/dashboard-modernize` at `2cedf50d6` — 52 commits ahead of master. Includes a **B14 architecture pivot from v1 (cross-origin) to v2 (same-origin co-resident via Apache mod_proxy)**. **User is still debugging v2** — treat the v2 details below as the as-coded snapshot, not confirmed working. Branch not yet pushed/merged.
 - **Pushed to:** GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr` (master).
 - **Deployed:** Railway `openemr` + `copilot` services live. `dashboard` service pending user push of `feat/dashboard-modernize`.
 - **Quality at last full-suite verification (`35b7d1d7f`):** **192 tests passing** (3 skipped — pre-existing `live_llm`). `make eval-fast` **15/15 across all 6 PRD categories**. `ruff check .` clean. Bug-fix commits between `35b7d1d7f` and `30cd84d87` are scoped (no architectural changes).
@@ -231,24 +231,48 @@ Night-shift run `2026-05-09-0213` shipped a Next.js 15 / React 19 / TypeScript p
 
 KR table (authoritative list in `.night-shift/runs/2026-05-09-0213/state.json`): KR2 (skeleton), KR4 (OAuth+FHIR proxy), KR5 (header + 6 cards), KR6 (Co-Pilot rail), KR7 (CI + defense doc + memory bank), KR8 (panel-scope authorization), KR9 (doc sync + fetch-rejection), KR10 (physician_user_id + logout CSRF), KR11 (Dockerfile + CSP), KR12-19 (doc accuracy passes after Codex rounds). KR1 + KR3 codex-rejected during proposal.
 
-### 5b — Master-side OpenEMR integration (Phase B14 in `systemPatterns.md`)
+### 5b — OpenEMR integration (architecture in active iteration; B14 v1 → v2 pivot)
 
-After the port branch landed, the next master cycle wired it into OpenEMR's authenticated UI so a finder click lands on the modern dashboard for the right patient — no re-authentication, no copy/paste UUIDs.
+**Status (2026-05-09 evening):** v1 (cross-origin separate Railway service) shipped on master between 2026-05-08 and 2026-05-09. v2 (same-origin co-resident via Apache mod_proxy) lives on `feat/dashboard-modernize` HEAD `2cedf50d6`. **User is still debugging v2** — the documented details are the as-coded snapshot, not confirmed working.
+
+#### v2 — same-origin co-resident (current, on `feat/dashboard-modernize`)
+
+The Next.js dashboard is **built into the same Railway container as OpenEMR** via a multi-stage Dockerfile. Apache `mod_proxy_http` forwards `/modern/*` → `127.0.0.1:3000` (Node 22). Same origin obviates all cross-origin workarounds.
+
+| Layer | File / config |
+|---|---|
+| Build | `Dockerfile` lines 1-12 — `node:24-alpine AS dashboard-build`, runs `npm run build` on `frontend/`. |
+| Image runtime | `Dockerfile` lines 88-96 — `apk add nodejs`; `COPY --from=dashboard-build /build/.next/standalone /opt/dashboard`; `COPY dashboard-proxy.conf /etc/apache2/conf.d/dashboard-proxy.conf`. |
+| Reverse proxy | `dashboard-proxy.conf` — `ProxyPass /modern/ http://127.0.0.1:3000/modern/`; sets `X-Forwarded-Proto: https`. |
+| Next.js basePath | `frontend/next.config.ts:16-17` — `basePath: "/modern"` + `assetPrefix: "/modern"`. |
+| Process lifecycle | `railway-entrypoint.sh` — starts `node /opt/dashboard/server.js` on :3000 before handing off to upstream `openemr.sh`. |
+| Launcher | `interface/patient_file/summary/dashboard.php` — view chooser; Modern URL is now relative `/modern/api/auth/login?next=/patient/<uuid>&launch=<token>`. |
+| Auth flow | `frontend/app/api/auth/{login,callback}/route.ts` — PKCE + signed `dashboard_session` cookie keyed into module-scope `tokenStore`. |
+| FHIR proxy | `frontend/app/api/fhir/[...path]/route.ts` — bearer-token injection + single-flight 401-refresh + panel-scope gate. |
+| Co-Pilot rail | `frontend/components/CopilotRail.tsx` — sandboxed iframe pointing at `${COPILOT_URL}/iframe?...`. |
+
+**What v2 obviates** (vs v1):
+- CSP `frame-ancestors` allowlist
+- `SameSite=None; Secure` cookies in prod
+- Upstream `SessionConfigurationBuilder.php` samesite-Lax flip
+- Separate `dashboard` Railway service + `DASHBOARD_URL` env on the OpenEMR service
+
+**Required env on the single container:** `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `DASHBOARD_PUBLIC_URL` (e.g., `https://openemr-production-0c8c.up.railway.app/modern`), `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `OPENEMR_VERIFY_TLS`, `SESSION_COOKIE_SECRET`, `COPILOT_URL`, optional `STRICT_PANEL_SCOPE`, optional `COPILOT_ADMIN_USERS`.
+
+#### v1 — cross-origin separate Railway service (superseded; still on master `30cd84d87`)
 
 | Commit | What landed |
 |---|---|
-| `0a49d038d` | New `interface/patient_file/summary/dashboard.php` launcher (302 to `${DASHBOARD_URL}/patient/<uuid>` via UuidRegistry; transparent fallback to `demographics.php` when env unset). Re-points two finder click handlers (`dynamic_finder.php`, `patient_select.php`). |
-| `4b9f181a2` | `Dockerfile`: `COPY` dashboard.php into `/tmp` then `cp` into image; `sed -i` swaps finder click URLs in upstream image. Two grep guards fail the build if injection didn't land. Necessary because Railway image is `FROM openemr/openemr:latest` with surgical injections — local `interface/` edits don't reach the container. |
-| `1d71642ec` | dashboard.php presents a view chooser ("Modern" vs "Legacy") instead of auto-redirecting. |
-| `cbeb2f03d` | Pre-warm OpenEMR session before redirect to skip login on first dashboard click. |
-| `77e4032fc` | Top-window JS navigation instead of HTTP 302 — fixes a frame-busting issue where some browsers stripped the navigation. |
-| `ad40380f3` | EHR-launch silent SSO: `SMARTLaunchToken` minted in dashboard.php, forwarded as `launch=<token>` through dashboard's `/api/auth/login` to OpenEMR's `/oauth2/default/authorize`. Dockerfile sed-patches `SessionConfigurationBuilder.php` to flip session cookie samesite from `Strict` → `Lax` so the OAuth bounce works cross-site. |
-| `a0fa9b252` | Dashboard renders inside OpenEMR's main frame (iframe-embed mode) — CSP `frame-ancestors` + same-origin nav guards. |
-| `0e29e0aac` | Cookie `secure=true` on the dashboard side to satisfy `SameSite=None` requirement when cross-site embedded. |
+| `0a49d038d` | New `dashboard.php` launcher (302 to absolute `${DASHBOARD_URL}/patient/<uuid>`); finder click re-point. |
+| `4b9f181a2` | Dockerfile `cp` + `sed` injection of dashboard.php and finder swap; build-time grep guards. |
+| `1d71642ec` | dashboard.php presents a view chooser instead of auto-redirecting. |
+| `cbeb2f03d` | Pre-warm OpenEMR session before redirect. |
+| `77e4032fc` | Top-window JS navigation instead of HTTP 302 — fixes frame-busting. |
+| `ad40380f3` | `SMARTLaunchToken` forwarded as `launch=<token>` through OAuth flow. Dockerfile sed-patch on `SessionConfigurationBuilder.php` flipping session cookie samesite `Strict` → `Lax` (no longer needed in v2). |
+| `a0fa9b252` | Iframe-embed mode + CSP `frame-ancestors` allowlist. |
+| `0e29e0aac` | Cookie `secure=true` on dashboard for `SameSite=None` cross-site embed. |
 
-**Net effect:** A clinician clicking a patient in OpenEMR's finder lands on the modern dashboard for the right patient, fully authenticated, with the Co-Pilot iframe rail already in place — zero login screens, zero copy/paste UUIDs.
-
-**Required env:** `DASHBOARD_URL` on the OpenEMR service. When unset, the launcher falls back to `demographics.php` (no-op).
+v1 required `DASHBOARD_URL` env on the OpenEMR service to enable the finder re-point.
 
 ### Out of scope (deferred from Surprise Challenge)
 
