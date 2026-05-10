@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.fhir.cache import TtlSingleFlightCache
 from app.fhir.oauth import FhirOAuthClient
 
 
@@ -34,6 +35,15 @@ class FhirClient:
             headers={"Accept": "application/fhir+json"},
             verify=settings.openemr_verify_tls,
         )
+        ttl = settings.copilot_fhir_cache_ttl_seconds
+        self._cache: TtlSingleFlightCache | None = (
+            TtlSingleFlightCache(
+                ttl_seconds=ttl,
+                max_entries=settings.copilot_fhir_cache_max_entries,
+            )
+            if ttl > 0
+            else None
+        )
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -47,6 +57,20 @@ class FhirClient:
         resource_type: str,
         resource_id: str,
         *,
+        physician_user_id: str,
+    ) -> dict[str, Any]:
+        if self._cache is None:
+            return await self._do_get_resource(resource_type, resource_id, physician_user_id)
+        key = ("get", resource_type, resource_id, physician_user_id)
+        return await self._cache.get_or_fetch(
+            key,
+            lambda: self._do_get_resource(resource_type, resource_id, physician_user_id),
+        )
+
+    async def _do_get_resource(
+        self,
+        resource_type: str,
+        resource_id: str,
         physician_user_id: str,
     ) -> dict[str, Any]:
         url = f"{self._settings.openemr_fhir_base}/{resource_type}/{resource_id}"
@@ -66,6 +90,20 @@ class FhirClient:
         resource_type: str,
         params: dict[str, Any],
         *,
+        physician_user_id: str,
+    ) -> dict[str, Any]:
+        if self._cache is None:
+            return await self._do_search(resource_type, params, physician_user_id)
+        key = ("search", resource_type, tuple(sorted(params.items())), physician_user_id)
+        return await self._cache.get_or_fetch(
+            key,
+            lambda: self._do_search(resource_type, params, physician_user_id),
+        )
+
+    async def _do_search(
+        self,
+        resource_type: str,
+        params: dict[str, Any],
         physician_user_id: str,
     ) -> dict[str, Any]:
         url = f"{self._settings.openemr_fhir_base}/{resource_type}"
@@ -136,7 +174,7 @@ class FhirClient:
             raise FhirError("OpenEMR REST timeout posting document") from e
         if r.status_code in (401, 403):
             raise FhirError(
-                f"OpenEMR REST access denied posting document",
+                "OpenEMR REST access denied posting document",
                 status=r.status_code,
             )
         if r.status_code not in (200, 201):

@@ -188,3 +188,62 @@ async def test_ttl_zero_bypasses_cache_entirely():
     assert a == {"v": 1}
     assert b == {"v": 2}
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_fhir_client_get_resource_caches_when_ttl_positive():
+    """End-to-end: same get_resource call twice in a row hits the cache."""
+    from app.config import Settings
+    from app.fhir.client import FhirClient
+
+    settings = Settings(
+        copilot_fhir_cache_ttl_seconds=60,
+        openemr_fhir_base="https://example.invalid/fhir",
+    )
+    client = FhirClient(settings)
+
+    calls = 0
+
+    async def fake_do_get_resource(resource_type, resource_id, physician_user_id):
+        nonlocal calls
+        calls += 1
+        return {"resourceType": resource_type, "id": resource_id, "call": calls}
+
+    # Replace the inner fetcher with a counter so we don't need an HTTP server.
+    client._do_get_resource = fake_do_get_resource  # type: ignore[assignment]
+
+    a = await client.get_resource("Patient", "abc", physician_user_id="dr_alvarez")
+    b = await client.get_resource("Patient", "abc", physician_user_id="dr_alvarez")
+
+    assert a["call"] == 1
+    assert b["call"] == 1  # cache hit — fetcher invoked once
+    assert calls == 1
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_fhir_client_get_resource_skips_cache_when_ttl_zero():
+    from app.config import Settings
+    from app.fhir.client import FhirClient
+
+    settings = Settings(
+        copilot_fhir_cache_ttl_seconds=0,
+        openemr_fhir_base="https://example.invalid/fhir",
+    )
+    client = FhirClient(settings)
+    calls = 0
+
+    async def fake_do_get_resource(resource_type, resource_id, physician_user_id):
+        nonlocal calls
+        calls += 1
+        return {"call": calls}
+
+    client._do_get_resource = fake_do_get_resource  # type: ignore[assignment]
+
+    await client.get_resource("Patient", "abc", physician_user_id="dr_alvarez")
+    await client.get_resource("Patient", "abc", physician_user_id="dr_alvarez")
+
+    assert calls == 2  # No cache; both calls hit the fetcher.
+
+    await client.aclose()
