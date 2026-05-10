@@ -13,18 +13,25 @@
 >   `TtlSingleFlightCache`). On by default; kill-switch via
 >   `COPILOT_FHIR_CACHE_TTL_SECONDS=0`. See
 >   `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`.
-> - **201 Co-Pilot tests** in `evals/` (191 pre-Phase-7 + 10 new cache
->   tests); **186 dashboard tests** in `frontend/tests/unit/`. The W2
+> - **Phase 8 hybrid retrieval shipped** (`copilot/app/retrieval/embeddings.py`
+>   + `corpus.py`). OpenAI `text-embedding-3-small` dense scoring fused
+>   with BM25 via Reciprocal Rank Fusion (k=60). **Default OFF**
+>   kill-switch via `COPILOT_DENSE_RETRIEVAL_ENABLED`; the BM25-only
+>   path runs byte-identically when the flag is off. See `COST.md` §11.
+> - **214 Co-Pilot tests** in `evals/` (191 pre-Phase-7 + 10 cache + 13
+>   dense); **186 dashboard tests** in `frontend/tests/unit/`. The W2
 >   eval gate is a 53-case subset (50 baseline + 2 informational/applied
 >   + 1 Layer-2 canary) — distinct from the full pytest count.
 > - **Demo path:** https://openemr-production-0c8c.up.railway.app/ (OpenEMR
 >   + `/modern/*` dashboard) · https://copilot-production-b532.up.railway.app/
 >   (Co-Pilot agent). The `agentforge-dashboard-*` service is paused
 >   (B14 v1 revert window; slated for delete after demo).
+> - **Demo video recorded.**
 >
-> **Still outstanding:** 3-5 min demo video; real `POST /fhir/DocumentReference`
-> (R4 has no route, Plan B blocked on `api:oemr` scope); dense retrieval
-> (in flight on `feat/dense-retrieval`, not yet on master).
+> **Still outstanding:** real `POST /fhir/DocumentReference` (R4 has no
+> route, Plan B REST path blocked on `api:oemr` scope, fail-soft
+> applies); post-demo cleanup (delete paused `agentforge-dashboard`
+> Railway project + merged feature branches).
 
 ---
 
@@ -154,15 +161,15 @@ The Co-Pilot iframe rail is embedded in two places on the production host
 
 ## Tests
 
-The pytest suite has **201 tests** in `evals/` (191 pre-Phase-7 + 10 new
-FHIR-cache tests). 3 are skipped (live-LLM cases gated behind `ANTHROPIC_LIVE=1`).
+The pytest suite has **214 tests** in `evals/` (191 pre-Phase-7 + 10
+FHIR-cache + 13 dense-retrieval). 3 are skipped (live-LLM cases gated behind `ANTHROPIC_LIVE=1`).
 The **W2 eval gate** is a 53-case subset of that total (50 baseline + 2
 informational/applied citation cases + 1 Layer-2 canary) and is the
 regression-blocking gate that runs in CI.
 
 ```bash
 make test       # PHI + tool integration tests only (no live LLM)
-make eval       # full suite, mocked LLM — ~201 passed, 3 skipped expected
+make eval       # full suite, mocked LLM — ~214 passed, 3 skipped expected
 make eval-live  # full suite, real LLM call (requires ANTHROPIC_API_KEY in env)
 ```
 
@@ -213,7 +220,7 @@ app/
 corpus/                12-chunk hand-curated guideline corpus (USPSTF/ADA/AHA)
 scripts/               generate_mvp_fixtures.py — deterministic synthetic
                        lab + intake PDFs for the pipeline smoke test
-evals/                 pytest suite — 201 tests (53-case eval gate + full
+evals/                 pytest suite — 214 tests (53-case eval gate + full
   agent/  ingestion/  retrieval/  tools/  persistence/  fhir/cache suite)
 ```
 
