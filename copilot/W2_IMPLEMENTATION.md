@@ -18,7 +18,8 @@
 - **Latency optimization (2026-05-10):** FHIR per-tenant cache shipped (`copilot/app/fhir/cache.py`). 60s TTL keyed by `(resource, query, physician)`. Set `COPILOT_FHIR_CACHE_TTL_SECONDS=0` on the Railway `copilot` service to disable. Spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`. Plan: `docs/superpowers/plans/2026-05-10-fhir-cache.md`.
 - **Hybrid retrieval (2026-05-10):** dense retrieval shipped (`copilot/app/retrieval/embeddings.py` + `corpus.py` integration). OpenAI `text-embedding-3-small` (1536 dims) embeds the 12-chunk seed corpus once at lifespan startup; per-query embedding LRU-cached (256 entries). When `COPILOT_DENSE_RETRIEVAL_ENABLED=true`, `corpus.search` runs BM25 + dense in parallel and fuses via Reciprocal Rank Fusion (k=60). Default-OFF kill-switch makes the change byte-identical to the prior BM25-only path. Embedding API failures (build-time or per-query) silently degrade to BM25-only. Tests: `evals/retrieval/test_dense.py` — 13 cases including cosine math, RRF correctness, fail-soft on API down, and byte-identical-when-off.
 - **PRD hard gate:** the documented regression-repro recipe still fires (`make eval-fast` exits 2 with `cross` dropping to 66.7% when `check_extracted_fact_has_source_doc` is commented). See `copilot/README.md` §"Verifying the W2 eval gate".
-- **Outstanding for W2 Final:** 3-5 min demo video; real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked, fail-soft applies); post-demo cleanup (delete paused `agentforge-dashboard` Railway project + four merged feature/fix branches on GitHub).
+- **Demo video recorded** (Sun 2026-05-10).
+- **Outstanding for W2 Final:** real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked, fail-soft applies; not blocking submission); post-demo cleanup (delete paused `agentforge-dashboard` Railway project + four merged feature/fix branches on GitHub).
 
 ---
 
@@ -31,7 +32,7 @@
 | 3 | Smoke-test polish (5 fixes) + regression-repro canary | 2026-05-07 | `f19f43514` | 174 (53/53) | ✅ shipped |
 | 4 | Front-desk arc + confirm/reject + modal viewer + panel-gate relaxes + bbox/OCR refinement | 2026-05-07 → 2026-05-09 | `30cd84d87` (master) | 192 (53/53) | ✅ shipped |
 | 5 | W2 Surprise Challenge — patient dashboard port + master integration + B14 v2 consolidation | 2026-05-09 → 2026-05-10 | `7124c20dd` (master) | 192 copilot + 186 dashboard | ✅ shipped + verified live |
-| 6 | W2 Final Submission — Cost & Latency Report shipped; demo video + dense retrieval + real FHIR write outstanding | Sun 2026-05-10 | `7124c20dd` | 192 | 🟡 partial |
+| 6 | W2 Final Submission — Cost & Latency Report + FHIR cache + dense retrieval shipped; demo video recorded; real FHIR write remains as documented gap | Sun 2026-05-10 | `994c86c6c` (master) | 214 copilot + 186 dashboard | ✅ shipped |
 
 ---
 
@@ -304,7 +305,7 @@ v1 required `DASHBOARD_URL` env on the OpenEMR service to enable the finder re-p
 
 ---
 
-## Phase 6 — W2 Final Submission (deadline Sun 2026-05-10 noon CT — partial shipped)
+## Phase 6 — W2 Final Submission (deadline Sun 2026-05-10 noon CT — shipped)
 
 ### ✅ Cost & Latency Report (`30cd84d87`)
 
@@ -332,13 +333,20 @@ v1 required `DASHBOARD_URL` env on the OpenEMR service to enable the finder re-p
 | CI evidence (Git hook + GitHub Actions) | `scripts/install-hooks.sh` + `.github/workflows/copilot-ci.yml` | ✅ |
 | Cost & latency report (actual + projected, p50/p95) | `copilot/COST.md` §§8-9 + `scripts/bench_latency.py` | ✅ shipped at `30cd84d87` |
 | Deployed application | live on Railway | ✅ |
-| **3-5 min demo video** | — | 📋 user owns |
+| **3-5 min demo video** | — | ✅ recorded |
+| **FHIR per-tenant cache** (latency optimization for §9 bottleneck) | `app/fhir/cache.py` + `COST.md` §10 | ✅ shipped |
+| **Hybrid retrieval (BM25 + dense + rerank)** — closes PRD-Core req #3 literal reading | `app/retrieval/embeddings.py` + `corpus.py` + `COST.md` §11 | ✅ shipped (default-OFF kill-switch, byte-identical to MVP when off) |
 
-### Still owed (in priority order)
+### Documented gap (carried into next sprint)
 
-1. **3-5 min demo video** — required by PRD. User owns capture. Recommended demo path: drop a lab PDF on iframe rail → "Extracted N facts" → ask "What was the LDL?" → grounded answer with bbox-modal citation → ask "what's new for this patient?" → agent uses `get_recent_uploads(confirmed_only=true)` → finder click in OpenEMR launches Modern dashboard with Co-Pilot rail (Phase 5b silent-SSO path).
-2. **Real `POST /fhir/DocumentReference`** replacing the `971affe8d` MVP stub. OpenEMR R4 has no route. Plan B REST path (`POST /apis/default/api/patient/{puuid}/document`) shipped at `c2534e416` but blocked on `api:oemr` OAuth scope. Three documented fix paths in Phase 4 above (option C cosmetic-only is the recommended demo posture). Round-trip eval: upload lab → re-fetch via `get_recent_labs` → verify `derivedFrom`.
-3. **Dense retrieval** — current build is BM25 + identity-rerank. Reranker scaffolding (Cohere + local cross-encoder) is in place; embedding store + dense scoring is the gap. Defensible-as-shipped if confronted.
+**Real `POST /fhir/DocumentReference`** replacing the `971affe8d` MVP stub.
+OpenEMR R4 has no route. Plan B REST path
+(`POST /apis/default/api/patient/{puuid}/document`) shipped at `c2534e416`
+but blocked on `api:oemr` OAuth scope. Three documented fix paths in
+Phase 4 above (option C cosmetic-only is the recommended demo posture).
+Round-trip eval: upload lab → re-fetch via `get_recent_labs` → verify
+`derivedFrom`. Fail-soft applies — Confirm stamps `confirmed_at`
+locally; only the OpenEMR-side back-write is missing.
 
 ### Final-deferred (next sprint, captured here so they don't get lost)
 
