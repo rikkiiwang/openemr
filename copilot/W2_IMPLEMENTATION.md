@@ -9,7 +9,7 @@
 
 ## TL;DR (status as of 2026-05-10 — post-consolidation refresh)
 
-- **Master tip:** `7124c20dd` (B14 v2 consolidation complete — four squash-merges landed: PR #1 consolidate-dashboard, PR #2 callback basePath, PR #3 CSP middleware, PR #5 CopilotRail iframe path). The `agentforge-dashboard` Railway service is paused as the revert window.
+- **Master tip:** `a8612b910` (Phase 7 FHIR per-tenant cache merge, 2026-05-10). Verified live on Railway. Master holds: B14 v2 same-origin dashboard architecture, full W2 Final Cost & Latency Report, FHIR cache with kill-switch.
 - **B14 LIVE topology:** single Railway container `refreshing-empathy/openemr` serves OpenEMR PHP at `/` AND the Next.js dashboard at `/modern/*` (Apache `mod_proxy` → loopback Node 22 on `:3000`). Same origin, same cookie jar — no SameSite=None / CSP frame-ancestors allowlist / build-time-baked CSP-fallback gymnastics. Verified end-to-end on Sun 2026-05-10 ≈ 01:00 PT (chooser → Modern → 6 cards + Co-Pilot rail render inside OpenEMR's frame; reception desk sees full patient finder).
 - **Dashboard branch `feat/dashboard-modernize` is now historical.** Its work is in master via PR #1's squash merge of integration branch `feat/consolidate-dashboard` (which itself merged dashboard-modernize). The three subsequent fix branches are likewise merged.
 - **Pushed to:** GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr` (master).
@@ -31,6 +31,7 @@
 | 4 | Front-desk arc + confirm/reject + modal viewer + panel-gate relaxes + bbox/OCR refinement | 2026-05-07 → 2026-05-09 | `30cd84d87` (master) | 192 (53/53) | ✅ shipped |
 | 5 | W2 Surprise Challenge — patient dashboard port + master integration + B14 v2 consolidation | 2026-05-09 → 2026-05-10 | `7124c20dd` (master) | 192 copilot + 186 dashboard | ✅ shipped + verified live |
 | 6 | W2 Final Submission — Cost & Latency Report shipped; demo video + dense retrieval + real FHIR write outstanding | Sun 2026-05-10 | `7124c20dd` | 192 | 🟡 partial |
+| 7 | Latency optimization — FHIR per-tenant cache (Approach B from brainstorm) | Sun 2026-05-10 | `a8612b910` (master) | 192 + 10 cache | ✅ shipped + verified live |
 
 ---
 
@@ -348,9 +349,92 @@ v1 required `DASHBOARD_URL` env on the OpenEMR service to enable the finder re-p
 
 ---
 
-## File map (current state at `30cd84d87`)
+## Phase 7 — Latency optimization: FHIR per-tenant cache (shipped 2026-05-10)
 
-> Phase 5 master-side integration adds `interface/patient_file/summary/dashboard.php` + `interface/main/finder/{dynamic_finder,patient_select}.php` edits; Dockerfile injects these. Phase 6 adds `copilot/scripts/bench_latency.py`. Backend Co-Pilot file structure is otherwise unchanged from Phase 4.
+The §9 bottleneck analysis identified the OpenEMR FHIR proxy (5s timeout + retry → 10s clusters) as the dominant wall-time contributor and promoted "per-tenant FHIR caching" to the highest-leverage performance lever. This phase ships that lever in the smallest, lowest-risk shape possible (Approach B from a 2026-05-10 brainstorming session).
+
+**Spec:** `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`
+**Plan:** `docs/superpowers/plans/2026-05-10-fhir-cache.md`
+**Merge commit:** `a8612b910` on master
+
+### What shipped
+
+A new module `copilot/app/fhir/cache.py` defines `TtlSingleFlightCache` — a single class bundling two roles:
+
+1. **TTL response cache.** `(key → (value, expires_at))` in an `OrderedDict`. Lazy eviction on read. LRU-bound at `max_entries` (default 1000). Misses populate; LRU trims at the bound.
+2. **In-flight Promise cache.** `(key → asyncio.Future)`, evicted on settle. Two concurrent calls for the same key share a single upstream fetch — closes the within-turn race that caused prewarm + the agent to both pay the FHIR round-trip on a cold cache.
+
+`FhirClient.get_resource` and `FhirClient.search` are wrapped at the entry point; the original httpx logic moved to `_do_get_resource` / `_do_search` private methods. Write methods (`create_*`, `post_*`) bypass entirely. Cache key includes `physician_user_id` as the LAST element so panel-scope safety is preserved (same patient + different physicians → different entries).
+
+### Configuration
+
+Two new pydantic-settings fields in `app/config.py`:
+
+- `copilot_fhir_cache_ttl_seconds: int = 60` — env: `COPILOT_FHIR_CACHE_TTL_SECONDS`. Set to `0` to disable the cache entirely (kill-switch, no redeploy needed; takes effect on next request).
+- `copilot_fhir_cache_max_entries: int = 1000` — env: `COPILOT_FHIR_CACHE_MAX_ENTRIES`. Bumpable if memory isn't the constraint.
+
+Default is **on** with 60s TTL — no Railway env change strictly required to activate.
+
+### Tests
+
+10 unit + integration tests in `copilot/evals/fhir/test_cache.py`:
+
+| Test | Behavior pinned |
+|---|---|
+| `test_ttl_hit_returns_cached_without_invoking_fetcher_twice` | TTL hit, single fetch |
+| `test_ttl_miss_after_expiry_re_invokes_fetcher` | Lazy eviction past TTL (monkeypatched clock) |
+| `test_lru_evicts_oldest_when_bound_exceeded` | LRU bound fires, oldest evicted |
+| `test_single_flight_concurrent_misses_share_one_fetch` | In-flight dedup, both awaiters succeed, fetcher invoked once |
+| `test_fetcher_error_propagates_and_does_not_cache` | Error doesn't poison cache; subsequent call re-invokes |
+| `test_fetcher_error_propagates_to_concurrent_awaiters` | Concurrent error propagation through shared Future |
+| `test_two_physicians_get_separate_cache_entries` | Panel-scope key contract (physician_user_id last) |
+| `test_ttl_zero_bypasses_cache_entirely` | Kill-switch identity-to-fetcher |
+| `test_fhir_client_get_resource_caches_when_ttl_positive` | End-to-end: `FhirClient.get_resource` hits cache |
+| `test_fhir_client_get_resource_skips_cache_when_ttl_zero` | End-to-end: kill-switch via `FhirClient` |
+
+Pre-push hook (`make eval-fast`) ran the W2 50-case eval gate twice (once per remote on push) — both passed 15/15 across 6 PRD categories with no regression.
+
+### Verification on Railway
+
+Smoke-tested live 2026-05-10 after deploy of `a8612b910`:
+- Cold first turn: pays full FHIR cost as expected.
+- Warm second turn: latency drop confirmed.
+- Langfuse trace integrity preserved (tool_results populated; citations work).
+- Kill-switch path (`COPILOT_FHIR_CACHE_TTL_SECONDS=0`) restores baseline.
+
+### Commit timeline
+
+13 commits on `docs/post-consolidation-memory-refresh` merged via `a8612b910`:
+
+| Commit | What |
+|---|---|
+| `bdf187736` | spec: 2026-05-10 FHIR cache design |
+| `20018a040` | plan: 12-task TDD implementation plan |
+| `b1086be99` | feat: config settings (TTL + max_entries) |
+| `7499e47c3` | feat: TtlSingleFlightCache skeleton + TTL hit |
+| `06ffc276c` | test: TTL expiry regression |
+| `eaf898d19` | feat: LRU-bound eviction |
+| `74872ab58` | feat: single-flight in-flight Promise cache |
+| `49c170391` | test: error-propagation behavior |
+| `232bbc817` | test: panel-scope safety + TTL=0 kill-switch |
+| `e90f95efd` | feat: wire TtlSingleFlightCache into FhirClient |
+| `cd8e6e662` | docs: COST.md §10 |
+| `965283043` | docs: W2_IMPLEMENTATION TL;DR |
+
+### Out of scope (explicit deferrals)
+
+- Cache invalidation on write (60s TTL absorbs the staleness window)
+- Redis / shared cache (single-replica only, by design)
+- Streaming / TTFT (verification contract requires full output before reveal)
+- Dense retrieval and `LocalCrossEncoderReranker` (Approach C in the spec — would touch answer quality and add Docker bloat)
+- Per-resource TTL tuning (uniform 60s for v1)
+- Cache hit-rate metrics in Langfuse (could be added later)
+
+---
+
+## File map (current state at `a8612b910`)
+
+> Phase 5 master-side integration adds `interface/patient_file/summary/dashboard.php` + `interface/main/finder/{dynamic_finder,patient_select}.php` edits; Dockerfile injects these. Phase 6 adds `copilot/scripts/bench_latency.py`. Phase 7 adds `copilot/app/fhir/cache.py` + `copilot/evals/fhir/test_cache.py` and modifies `copilot/app/fhir/client.py` (read methods routed through cache) + `copilot/app/config.py` (two new settings fields). Backend Co-Pilot file structure is otherwise unchanged from Phase 4.
 
 > Lists files **modified or added** since W1. Files unchanged from W1 are not enumerated.
 

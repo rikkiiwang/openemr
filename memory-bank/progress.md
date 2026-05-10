@@ -451,6 +451,26 @@ v1 required `DASHBOARD_URL` env on the OpenEMR service to enable the finder re-p
 
 ---
 
+## ✅ Phase 7 — Latency optimization: FHIR per-tenant cache (shipped + verified 2026-05-10)
+
+Closes the §9 bottleneck identified in Phase 6's Cost & Latency Report. Approach B from a 2026-05-10 brainstorming session. Spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`. Plan: `docs/superpowers/plans/2026-05-10-fhir-cache.md`. Merge commit: **`a8612b910`** on master.
+
+**What shipped:** `copilot/app/fhir/cache.py` defines `TtlSingleFlightCache`, a single class with two roles:
+1. TTL response cache (`OrderedDict`-backed, lazy eviction on read, LRU-bound at `max_entries`).
+2. In-flight Promise cache (`asyncio.Future` per key, evicted on settle) — closes the within-turn race where prewarm + agent both pay the FHIR round-trip on a cold cache.
+
+`FhirClient.get_resource` and `search` now route through the cache; httpx logic moved to `_do_get_resource` / `_do_search`. Write methods bypass entirely. Cache key includes `physician_user_id` as the LAST element so panel-scope safety is preserved (verified by `test_two_physicians_get_separate_cache_entries`).
+
+**Configuration:** `COPILOT_FHIR_CACHE_TTL_SECONDS` (default 60; set to 0 to disable as kill-switch with no redeploy needed) + `COPILOT_FHIR_CACHE_MAX_ENTRIES` (default 1000). Cache is on by default — no Railway env change required to activate.
+
+**Tests:** 10 unit + integration tests in `copilot/evals/fhir/test_cache.py` covering TTL hit/expiry, LRU eviction, single-flight, error propagation (single + concurrent), panel-scope safety, kill-switch, and `FhirClient` end-to-end. Pre-push hook (`make eval-fast`) ran the W2 50-case eval gate twice on push (once per remote) — both passed 15/15 across 6 PRD categories with no regression.
+
+**Verification on Railway (2026-05-10):** smoke-tested live after deploy of `a8612b910`. Cold first turn pays full FHIR cost; warm second turn shows expected latency drop. Langfuse trace integrity preserved (tool_results populated; citations work; no PHI). Kill-switch path verified (`COPILOT_FHIR_CACHE_TTL_SECONDS=0` restores baseline).
+
+**Out of scope (explicit deferrals):** cache invalidation on write (60s TTL absorbs); shared/Redis cache (single-replica only); streaming/TTFT (verification contract precludes); dense retrieval (Approach C from spec, deferred); per-resource TTL tuning (uniform 60s).
+
+---
+
 ## ✅ Master-side bug fixes between Phase 4 tip and Final partial (2026-05-08 → 2026-05-09)
 
 Captured for completeness — these are the commits between `35b7d1d7f` (last documented Phase 4 tip) and `30cd84d87` (current master):

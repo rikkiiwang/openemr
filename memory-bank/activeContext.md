@@ -1,10 +1,12 @@
 # Active Context
 
-**Last updated:** 2026-05-10 (consolidation v2 shipped + verified live. Master @ `7124c20dd` after four squash-merges:`81baf8186` consolidate-dashboard, `2cb818c43` callback basePath, `4ec0f07b0` CSP middleware, `7124c20dd` CopilotRail iframe path. The agentforge-dashboard Railway service is **paused** as the revert window; slated for delete after demo.)
+**Last updated:** 2026-05-10 evening (Phase 7 FHIR per-tenant cache shipped + verified live. Master @ `a8612b910` — merge commit of `docs/post-consolidation-memory-refresh` into master, including B14 v2 memory-bank refresh + 2026-05-10 FHIR cache spec + 12-task TDD plan + Tasks 1-11 implementation. The cache is on by default (60s TTL); kill-switch is `COPILOT_FHIR_CACHE_TTL_SECONDS=0` on the `copilot` Railway service. Smoke-tested live: cold first turn pays full FHIR cost, warm second turn shows expected latency drop. The agentforge-dashboard Railway service from B14 v1 is **paused** as the revert window; slated for delete after demo.)
 
 ## Where we are right now
 
-**On master (`7124c20dd`) — B14 v2 LIVE:** the consolidated single-container architecture is deployed and end-to-end verified. The Next.js dashboard runs as a co-resident Node process inside OpenEMR's Apache container; mod_proxy forwards `/modern/*` → `127.0.0.1:3000`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist needed for the embed. Confirmed working in production:
+**On master (`a8612b910`) — Phase 7 FHIR cache LIVE:** the FHIR per-tenant cache (Approach B from 2026-05-10 brainstorming) is deployed and verified live. Cold first turn pays full FHIR cost; warm second turn shows expected drop. Configuration: `COPILOT_FHIR_CACHE_TTL_SECONDS=60` (default, no env change needed) / `=0` (kill-switch, no redeploy). Cache key includes `physician_user_id` so panel-scope safety is preserved. Spec at `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`; plan at `docs/superpowers/plans/2026-05-10-fhir-cache.md`; 13 commits merged via `a8612b910`.
+
+**Underlying Phase 5 architecture (B14 v2 — still LIVE):** the consolidated single-container deployment is unchanged. The Next.js dashboard runs as a co-resident Node process inside OpenEMR's Apache container; mod_proxy forwards `/modern/*` → `127.0.0.1:3000`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist needed for the embed. Confirmed working in production:
 - `https://openemr-production-0c8c.up.railway.app/modern/api/health` returns 200 with clean headers (`frame-ancestors 'self'`, `x-frame-options: SAMEORIGIN`, `set-cookie SameSite=Lax + Secure`).
 - Modern click in patient finder → chooser → dashboard renders inside OpenEMR's frame at `…0c8c…/modern/patient/<uuid>`. URL bar stays on the OpenEMR origin throughout.
 - All 6 cards render (Encounters fixed by granting `user/Encounter.read` on the OAuth client — was previously missing).
@@ -23,9 +25,10 @@
 **`feat/dashboard-modernize` (`2cedf50d6`) is now historical** — its work is in master via PR #1's squash merge of `feat/consolidate-dashboard` (which itself merged dashboard-modernize into a fresh integration branch off master). Safe to delete the feature branch and the three subsequent fix branches (`fix/dashboard-callback-basepath`, `fix/csp-runtime-frame-src`, `fix/copilot-rail-iframe-path`) on GitHub.
 
 **Outstanding for W2 Final (Sun 2026-05-10 noon CT):**
-1. **3-5 min demo video** — user owns capture.
+1. **3-5 min demo video** — user owns capture. Recommended path now includes the cache speedup: ask UC1 brief → wait full latency → ask follow-up → near-instant.
 2. **Real `POST /fhir/DocumentReference`** — R4 has no route. Plan B REST path is OAuth-scope-blocked (`api:oemr` not on the token); fail-soft makes Confirm cosmetic-only. Three fix paths in `W2_IMPLEMENTATION.md` Phase 4.
 3. **Dense retrieval** — BM25 + identity-rerank shipped. Reranker scaffolding (Cohere + local cross-encoder) ready; embedding store + dense scoring is the gap. Defensible-as-shipped if confronted, but a literal PRD reading is unmet.
+4. ~~Latency optimization~~ — ✅ Phase 7 FHIR cache shipped + verified at `a8612b910`. Closes the §9 bottleneck (OpenEMR FHIR proxy 5s/10s clusters).
 
 The PRD hard-gate (eval gate fires on regression) **continues to fire** at `f19f43514` and forward — see `W2_IMPLEMENTATION.md` Phase 3 for the canary mechanism.
 
