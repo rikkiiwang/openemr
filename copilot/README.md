@@ -232,7 +232,20 @@ evals/                 pytest suite — 75 tests (W1: 42 + W2 MVP: 33)
   Confirm/Reject UX with OpenEMR REST writeback (Plan B), modal viewer
   rail-expansion + zoom toolbar, panel-gate relaxes. See
   `W2_IMPLEMENTATION.md` Phases 3-4 for the per-commit log.
-- 📋 Week 2 Final (Sunday) — cost/latency report, demo video polish.
+- ✅ **Week 2 Surprise Challenge** — Next.js 15 / React 19 / TypeScript
+  port of OpenEMR's PHP patient dashboard, then **consolidated into
+  OpenEMR's Apache container** (B14 v2): multi-stage Dockerfile builds
+  the dashboard into `/opt/dashboard`, Apache `mod_proxy` forwards
+  `/modern/*` to the loopback Node process. Same origin = same cookie
+  jar, no SameSite=None workarounds, no CSP frame-ancestors allowlist.
+  Defense doc at [`../PATIENT_DASHBOARD_MIGRATION.md`](../PATIENT_DASHBOARD_MIGRATION.md);
+  pattern catalogued as B14 in `memory-bank/systemPatterns.md`.
+  186 dashboard unit tests across 20 files.
+- ✅ **Week 2 Final (Sunday 2026-05-10)** — Cost & Latency Report shipped
+  (`COST.md` §§8-9 measured live on Railway across 15 turns; §10 ships
+  a per-tenant FHIR cache with single-flight in-flight Promise dedup,
+  60s TTL, LRU bound 1000 — addresses §9's identified bottleneck).
+  Demo video recorded.
 
 ## Week 2 highlights
 

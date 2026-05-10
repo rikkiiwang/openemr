@@ -7,9 +7,10 @@ Gauntlet AI Austin admission track. This repo is a fork of [openemr/openemr](htt
 | Surface | URL |
 |---|---|
 | OpenEMR (fork, with Co-Pilot rail) | <https://openemr-production-0c8c.up.railway.app/> |
+| Modern patient dashboard (Next.js, embedded) | <https://openemr-production-0c8c.up.railway.app/modern/> |
 | Clinical Co-Pilot agent (standalone) | <https://copilot-production-b532.up.railway.app/> |
 
-Open the OpenEMR URL, log in, pick a patient → the Co-Pilot rail tab is on the right edge of the demographics page. The standalone agent URL is for the demo video and direct API access.
+Open the OpenEMR URL, log in, pick a patient → a chooser appears with **Modern Dashboard** (Next.js) and **Legacy View** (PHP). The Co-Pilot rail is visible on the right in both views. The Next.js dashboard is co-hosted inside OpenEMR's container; same origin, single deploy. The standalone Co-Pilot URL is for the demo video and direct API access.
 
 ## Week 1 deliverables
 
@@ -17,6 +18,16 @@ Open the OpenEMR URL, log in, pick a patient → the Co-Pilot rail tab is on the
 - [`USERS.md`](USERS.md) — target user, workflow, agent-vs-UI justification
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — AI integration design
 - [`copilot/README.md`](copilot/README.md) — Co-Pilot service: setup, OAuth registration, deploy, eval suite
+
+## Week 2 deliverables
+
+- [`copilot/W2_ARCHITECTURE.md`](copilot/W2_ARCHITECTURE.md) — design-of-record from the architecture-defense gate (§1–§10) + Appendix C documenting the deployed-MVP delta
+- [`copilot/W2_IMPLEMENTATION.md`](copilot/W2_IMPLEMENTATION.md) — phase log: MVP → Early Submission → Polish → Front-desk arc → Surprise Challenge + B14 v2 consolidation → Final
+- [`copilot/COST.md`](copilot/COST.md) — cost & latency report; §8 measured baseline, §9 bottleneck analysis, §10 FHIR per-tenant cache (shipped 2026-05-10)
+- [`copilot/evals/`](copilot/evals/) — 50-case golden eval set across 6 PRD-named categories; pre-push hook + GH workflow gate the build
+- [`PATIENT_DASHBOARD_MIGRATION.md`](PATIENT_DASHBOARD_MIGRATION.md) — Surprise Challenge defense doc: PHP → Next.js 15 / React 19 / TypeScript port, co-hosted in OpenEMR's container
+
+**Status (2026-05-10):** all required deliverables shipped. Demo video recorded. Awaiting submission.
 
 ---
 
