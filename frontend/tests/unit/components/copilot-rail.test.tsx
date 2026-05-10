@@ -8,14 +8,14 @@ describe("CopilotRail", () => {
     const html = renderToStaticMarkup(
       <CopilotRail patientId="abc-123" copilotUrl="https://copilot.example.com" />,
     );
-    expect(html).toContain('src="https://copilot.example.com/iframe?patient_id=abc-123"');
+    expect(html).toContain('src="https://copilot.example.com/?patient_id=abc-123"');
   });
 
   it("strips trailing slashes from copilotUrl", () => {
     const html = renderToStaticMarkup(
       <CopilotRail patientId="x" copilotUrl="https://copilot.example.com/" />,
     );
-    expect(html).toContain('src="https://copilot.example.com/iframe?patient_id=x"');
+    expect(html).toContain('src="https://copilot.example.com/?patient_id=x"');
   });
 
   it("URL-encodes the patient_id (URLSearchParams space → '+')", () => {

@@ -30,7 +30,11 @@ export function CopilotRail({ patientId, copilotUrl, physicianUserId }: CopilotR
   if (physicianUserId) {
     params.set("physician_user_id", physicianUserId);
   }
-  const src = `${trimmed}/iframe?${params.toString()}`;
+  // The Co-Pilot service serves the iframe shell at "/" (root), not "/iframe"
+  // — see copilot/app/main.py:117 (@app.get("/") → get_iframe_shell).
+  // The HTML uses absolute /static/* paths for its CSS/JS, so the URL path
+  // we land at doesn't affect asset resolution.
+  const src = `${trimmed}/?${params.toString()}`;
   return (
     <aside
       className="hidden w-[400px] shrink-0 border-l border-gray-200 dark:border-gray-700 lg:block"
