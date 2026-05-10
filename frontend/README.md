@@ -81,7 +81,8 @@ build on every PR touching `frontend/**`.
 
 ## Branch / status
 
-`feat/dashboard-modernize` (off master `073e66388`; for the exact
-commit count run `git rev-list --count master..feat/dashboard-modernize`)
-shipped by night-shift run `2026-05-09-0213`. Not yet pushed/merged.
-Manual follow-up steps are listed in `memory-bank/assignments/week2.md §7`.
+The modern dashboard (`feat/dashboard-modernize`) was squash-merged to master
+via PR #1. It is live on master at tip `a8612b910` and deployed as part of the
+B14 v2 same-origin topology: a single Railway container serves OpenEMR PHP at
+`/` and this Next.js app at `/modern/*` via Apache `mod_proxy` → loopback Node
+22 on `:3000`. No cross-origin setup is needed — same cookie jar as OpenEMR.
