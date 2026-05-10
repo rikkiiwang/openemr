@@ -129,6 +129,16 @@ class Settings(BaseSettings):
     copilot_fhir_cache_ttl_seconds: int = 60
     copilot_fhir_cache_max_entries: int = 1000
 
+    # Dense retrieval (2026-05-10). When enabled, GuidelineCorpus.search
+    # runs BM25 + OpenAI text-embedding-3-small dense scoring in parallel
+    # and fuses via reciprocal rank fusion (RRF). When disabled (default,
+    # the kill-switch position), search is byte-identical to the
+    # BM25-only path that has been live since W2 MVP. Each path fetches
+    # `dense_top_k` candidates before fusion; the fused list is truncated
+    # to the caller's `top_k`.
+    copilot_dense_retrieval_enabled: bool = False
+    copilot_dense_retrieval_top_k: int = 10
+
 
 @lru_cache
 def get_settings() -> Settings:

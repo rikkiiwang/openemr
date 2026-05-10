@@ -2,35 +2,29 @@
 
 [![copilot-ci](https://github.com/rikkiiwang/openemr/actions/workflows/copilot-ci.yml/badge.svg?branch=master)](https://github.com/rikkiiwang/openemr/actions/workflows/copilot-ci.yml)
 
-> **What `feat/w2-early-submission` ships** (autonomous night-shift run
-> `2026-05-06-0104`, 27+ task-commits since `78d0672c7`):
+> **Current master state** (tip `a8612b910`, 2026-05-10):
 >
-> - **LangGraph state machine** — supervisor + `intake_extractor` +
->   `evidence_retriever` workers + `answer_composer` (W1 loop wrapped) +
->   `critic` node, with deterministic plain-Python routing
->   (`app/graph/`).
-> - **PRD-mandated 50-case eval gate** with five boolean rubric scorers
->   + threshold-based regression check + `make eval-fast` (<2 s, <2 min
->   target) + pre-push hook installer + CI extension. See "Verifying the
->   W2 eval gate" below for the regression-repro recipe.
-> - **6 new W2 TurnTrace fields** + Langfuse `generation()` spans per
->   LLM call so model identity surfaces in the trace UI.
-> - **Reranker scaffolding** (`app/retrieval/rerank.py`) — Identity /
->   Cohere / local-cross-encoder; default Identity in CI.
-> - **Tier-2 LITE front-desk role** — `GET /v1/sessions/{id}/pending_intakes`
->   + iframe banner with expandable list + ACL grant for the stock
->   `Front Office` group (acl_upgrade.php v14). See "Front-desk demo
->   prep" below.
-> - **148 tests passing**, 50/50 eval cases at 100% across all six
->   PRD-named categories. The branch is **green at every commit** by
->   design (per-task structural pre-commit gate).
+> - **B14 v2 same-origin topology** — single Railway container
+>   `refreshing-empathy/openemr` serves OpenEMR PHP at `/` and the
+>   Next.js dashboard at `/modern/*` via Apache `mod_proxy` → loopback
+>   Node 22 on `:3000`. Same origin = same cookie jar; no `SameSite=None`
+>   or `frame-ancestors` allowlist required.
+> - **Phase 7 FHIR cache shipped** (`copilot/app/fhir/cache.py`,
+>   `TtlSingleFlightCache`). On by default; kill-switch via
+>   `COPILOT_FHIR_CACHE_TTL_SECONDS=0`. See
+>   `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`.
+> - **201 Co-Pilot tests** in `evals/` (191 pre-Phase-7 + 10 new cache
+>   tests); **186 dashboard tests** in `frontend/tests/unit/`. The W2
+>   eval gate is a 53-case subset (50 baseline + 2 informational/applied
+>   + 1 Layer-2 canary) — distinct from the full pytest count.
+> - **Demo path:** https://openemr-production-0c8c.up.railway.app/ (OpenEMR
+>   + `/modern/*` dashboard) · https://copilot-production-b532.up.railway.app/
+>   (Co-Pilot agent). The `agentforge-dashboard-*` service is paused
+>   (B14 v1 revert window; slated for delete after demo).
 >
-> **What stays Final-deferred:** real `POST /fhir/DocumentReference`,
-> round-trip eval test, full `_verify_patient_in_facility` helper,
-> dataset expansion to 18-20 patients × 2 facilities, persistent
-> banner-dismiss, dense retrieval (OpenAI embeddings), cost+latency
-> report, demo video. See `copilot/W2_IMPLEMENTATION.md` §"Phase 6 —
-> W2 Final Submission" for the deferred-items list.
+> **Still outstanding:** 3-5 min demo video; real `POST /fhir/DocumentReference`
+> (R4 has no route, Plan B blocked on `api:oemr` scope); dense retrieval
+> (in flight on `feat/dense-retrieval`, not yet on master).
 
 ---
 
@@ -148,14 +142,27 @@ The standalone chat UI is served at `/` on the agent host:
 Paste a patient FHIR UUID, click "Open chart", ask a question. Useful for the
 demo video and for hitting the agent without going through OpenEMR.
 
+The Co-Pilot iframe rail is embedded in two places on the production host
+(`openemr-production-0c8c.up.railway.app`):
+
+1. **OpenEMR legacy demographics page** — the 36px `Co-Pilot ▸` tab on the
+   right edge of every patient chart (original B14 v1 surface).
+2. **Modern Next.js dashboard** (`/modern/*`) — the `CopilotRail` component
+   inside the co-resident dashboard, co-hosted in the same container via
+   `mod_proxy` at `/modern/*`. Same origin means no `SameSite=None` or
+   `frame-ancestors` configuration is needed.
+
 ## Tests
 
-The eval suite has **75 tests** (Week 1 baseline: 42; Week 2 MVP: +33),
-3 skipped (live-LLM cases gated behind `ANTHROPIC_LIVE=1`):
+The pytest suite has **201 tests** in `evals/` (191 pre-Phase-7 + 10 new
+FHIR-cache tests). 3 are skipped (live-LLM cases gated behind `ANTHROPIC_LIVE=1`).
+The **W2 eval gate** is a 53-case subset of that total (50 baseline + 2
+informational/applied citation cases + 1 Layer-2 canary) and is the
+regression-blocking gate that runs in CI.
 
 ```bash
 make test       # PHI + tool integration tests only (no live LLM)
-make eval       # full suite, mocked LLM — 75 passed, 3 skipped expected
+make eval       # full suite, mocked LLM — ~201 passed, 3 skipped expected
 make eval-live  # full suite, real LLM call (requires ANTHROPIC_API_KEY in env)
 ```
 
@@ -206,8 +213,8 @@ app/
 corpus/                12-chunk hand-curated guideline corpus (USPSTF/ADA/AHA)
 scripts/               generate_mvp_fixtures.py — deterministic synthetic
                        lab + intake PDFs for the pipeline smoke test
-evals/                 pytest suite — 75 tests (W1: 42 + W2 MVP: 33)
-  agent/  ingestion/  retrieval/  tools/  persistence/
+evals/                 pytest suite — 201 tests (53-case eval gate + full
+  agent/  ingestion/  retrieval/  tools/  persistence/  fhir/cache suite)
 ```
 
 ## Status
@@ -232,7 +239,16 @@ evals/                 pytest suite — 75 tests (W1: 42 + W2 MVP: 33)
   Confirm/Reject UX with OpenEMR REST writeback (Plan B), modal viewer
   rail-expansion + zoom toolbar, panel-gate relaxes. See
   `W2_IMPLEMENTATION.md` Phases 3-4 for the per-commit log.
-- 📋 Week 2 Final (Sunday) — cost/latency report, demo video polish.
+- ✅ **Week 2 Final** — cost/latency report shipped (`copilot/COST.md` §§8-9);
+  FHIR per-tenant cache shipped (`COST.md` §10, `app/fhir/cache.py`);
+  hybrid retrieval shipped (`COST.md` §11, `app/retrieval/embeddings.py`
+  + `corpus.py`) — OpenAI `text-embedding-3-small` dense scoring fused
+  with BM25 via Reciprocal Rank Fusion, default-OFF kill-switch
+  (`COPILOT_DENSE_RETRIEVAL_ENABLED`), full fail-soft to BM25 on API
+  failure. Demo video recorded.
+- 📋 Remaining: real `POST /fhir/DocumentReference` (Plan B blocked on
+  `api:oemr` scope); post-demo cleanup (delete paused
+  `agentforge-dashboard` Railway project + merged feature branches).
 
 ## Week 2 highlights
 
@@ -252,6 +268,12 @@ What the deployed Co-Pilot can do today (`https://copilot-production-b532.up.rai
   evidence, returning two citation chips in one response.
 - **sha3-512 idempotency** — re-dropping the same PDF triggers a "deduped"
   toast; no second extraction, no duplicate observation.
+- **FHIR per-tenant response cache** — all FHIR reads are cached with a 60s
+  TTL scoped to `physician_user_id`, eliminating redundant API calls within a
+  session. Kill-switch: set `COPILOT_FHIR_CACHE_TTL_SECONDS=0` on Railway (no
+  redeploy required). Max entries controlled by
+  `COPILOT_FHIR_CACHE_MAX_ENTRIES` (default 1000). Spec:
+  `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`.
 
 See [`W2_IMPLEMENTATION.md`](./W2_IMPLEMENTATION.md) for the full Week 2
 implementation log (MVP through current branch tip), and
