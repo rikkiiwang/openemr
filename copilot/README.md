@@ -240,10 +240,15 @@ evals/                 pytest suite — 201 tests (53-case eval gate + full
   rail-expansion + zoom toolbar, panel-gate relaxes. See
   `W2_IMPLEMENTATION.md` Phases 3-4 for the per-commit log.
 - ✅ **Week 2 Final** — cost/latency report shipped (`copilot/COST.md` §§8-9);
-  FHIR per-tenant cache shipped (Phase 7, `app/fhir/cache.py`).
-- 📋 Remaining: 3-5 min demo video; dense retrieval (in flight on
-  `feat/dense-retrieval`); real `POST /fhir/DocumentReference` (Plan B
-  blocked on `api:oemr` scope).
+  FHIR per-tenant cache shipped (`COST.md` §10, `app/fhir/cache.py`);
+  hybrid retrieval shipped (`COST.md` §11, `app/retrieval/embeddings.py`
+  + `corpus.py`) — OpenAI `text-embedding-3-small` dense scoring fused
+  with BM25 via Reciprocal Rank Fusion, default-OFF kill-switch
+  (`COPILOT_DENSE_RETRIEVAL_ENABLED`), full fail-soft to BM25 on API
+  failure. Demo video recorded.
+- 📋 Remaining: real `POST /fhir/DocumentReference` (Plan B blocked on
+  `api:oemr` scope); post-demo cleanup (delete paused
+  `agentforge-dashboard` Railway project + merged feature branches).
 
 ## Week 2 highlights
 

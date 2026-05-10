@@ -377,3 +377,82 @@ shared/Redis cache (single-replica only); per-resource TTL tuning
 (uniform 60s); streaming / TTFT (verification contract precludes).
 
 See design spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`.
+
+---
+
+## §11 — Hybrid retrieval: BM25 + dense via OpenAI embeddings (added 2026-05-10)
+
+Closes the PRD-Core req #3 reading ("hybrid sparse + dense + rerank").
+The W2 MVP shipped sparse (BM25 over the 12-chunk seed corpus) plus a
+Reranker `Protocol` scaffold; this section documents the dense path
+that fuses with BM25 ahead of the reranker.
+
+**Implementation:** `app/retrieval/embeddings.py` + `app/retrieval/corpus.py`.
+
+- **Embedding model:** OpenAI `text-embedding-3-small` (1536 dims).
+- **When:** the entire corpus is embedded once at FastAPI lifespan
+  startup via `embed_batch`. Per-query embeddings are LRU-cached (256
+  entries) so repeated queries within a session pay zero API cost.
+- **Storage:** in-memory `dict[chunk_id, list[float]]` on the
+  `GuidelineCorpus` instance. 12 chunks × 1536 × 4 bytes ≈ 72 KB. No
+  SQLite BLOB column, no separate vector store. For the 100→1000
+  patient scaling tier the swap to pgvector / sqlite-vss is one
+  function rewrite (`_dense_search`).
+- **Fusion:** Reciprocal Rank Fusion, `score(d) = Σ 1 / (k + rank_i(d))`
+  with k=60 (Cormack et al. 2009 default). Both paths fetch
+  `dense_top_k` candidates (default 10) before fusion; the fused list
+  truncates to the caller's `top_k`.
+
+**Cost (per chat session):**
+
+| Path | Cold cost | Warm cost (within 60s session) |
+|---|---|---|
+| Corpus embedding (one-time per process boot) | ~12 chunks × ~100 tokens × $0.02/1M = $0.000024 | $0 |
+| Query embedding | ~10 tokens × $0.02/1M = $0.0000002 | $0 (LRU hit) |
+
+Net: dense retrieval adds **<$0.001 per 1,000 chat sessions** —
+trivially absorbed by the §1.1 LLM costs.
+
+**Latency:** one extra OpenAI roundtrip per uncached query (~50-200 ms,
+geographically dependent). Cached queries pay 0. Compared to the ~10 s
+FHIR-proxy bottleneck identified in §9, this is in the noise.
+
+**Configuration** (env on the `copilot` Railway service):
+
+- `COPILOT_DENSE_RETRIEVAL_ENABLED` — default `false` (kill-switch in
+  the safe position; the byte-identical BM25-only path is what runs).
+  Flip to `true` after eval-suite confirms no regression.
+- `COPILOT_DENSE_RETRIEVAL_TOP_K` — default `10`. How many candidates
+  each path returns before RRF fusion.
+
+**Fail-soft posture:**
+
+- Build-time embedding failure (OPENAI_API_KEY missing, API outage) →
+  corpus stays usable; `_embeddings` dict empty; search silently
+  degrades to BM25-only. Logged at WARNING.
+- Per-query embedding failure → that one query falls back to BM25-only.
+  Logged at WARNING. Next query retries.
+- Dimension mismatch → cosine raises ValueError → caught at the
+  `corpus.search` boundary, falls back to BM25.
+
+These match the existing critic / rerank fail-soft pattern: the agent
+never crashes /v1/chat over an external-dep blip.
+
+**Out of scope:**
+
+- **Per-resource embeddings.** Guideline chunks are embedded; FHIR
+  resources (Patient, Observation) are not — the FHIR layer is
+  structured, not free-text, so dense doesn't add over the existing
+  REST queries.
+- **Embedding store persistence.** Embeddings rebuild at every process
+  boot (~3 s for 12 chunks). At the 100→1000 patient tier, swap to
+  pgvector or sqlite-vss; the `_dense_search` interface stays the same.
+- **Hybrid weight tuning.** RRF k=60 is a known-good default; we don't
+  tune per-corpus.
+- **Fine-tuned embeddings.** `text-embedding-3-small` off the shelf is
+  more than sufficient at this corpus scale.
+
+**Tests:** `evals/retrieval/test_dense.py` — 13 cases covering cosine
+math, RRF correctness, kill-switch byte-identity, build-time failure
+fallback, and per-query failure fallback. Mocks the OpenAI client so
+CI runs without an API key.
