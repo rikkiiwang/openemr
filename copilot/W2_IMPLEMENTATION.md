@@ -15,6 +15,7 @@
 - **Pushed to:** GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr` (master).
 - **Deployed:** Railway `openemr` (with co-resident dashboard) + `copilot` live; `agentforge-dashboard` paused.
 - **Quality at last full-suite verification (`35b7d1d7f`):** **192 copilot tests + 186 dashboard tests** passing. `make eval-fast` **15/15 across all 6 PRD categories**. `ruff check .` clean.
+- **Latency optimization (2026-05-10):** FHIR per-tenant cache shipped (`copilot/app/fhir/cache.py`). 60s TTL keyed by `(resource, query, physician)`. Set `COPILOT_FHIR_CACHE_TTL_SECONDS=0` on the Railway `copilot` service to disable. Spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`. Plan: `docs/superpowers/plans/2026-05-10-fhir-cache.md`.
 - **PRD hard gate:** the documented regression-repro recipe still fires (`make eval-fast` exits 2 with `cross` dropping to 66.7% when `check_extracted_fact_has_source_doc` is commented). See `copilot/README.md` §"Verifying the W2 eval gate".
 - **Outstanding for W2 Final:** 3-5 min demo video; real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked, fail-soft applies); dense retrieval (current build is BM25 + identity-rerank); post-demo cleanup (delete paused `agentforge-dashboard` Railway project + four merged feature/fix branches on GitHub).
 
