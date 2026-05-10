@@ -151,3 +151,40 @@ async def test_fetcher_error_propagates_to_concurrent_awaiters():
 
     # Fetcher invoked exactly once even though both raised.
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_two_physicians_get_separate_cache_entries():
+    cache = TtlSingleFlightCache(ttl_seconds=60, max_entries=10)
+    calls = 0
+
+    async def fetcher():
+        nonlocal calls
+        calls += 1
+        return {"call": calls}
+
+    # Same patient, different physicians → keys must differ → fetcher
+    # invoked twice. This is the panel-scope safety contract.
+    await cache.get_or_fetch(("get", "Patient", "abc-123", "dr_alvarez"), fetcher)
+    await cache.get_or_fetch(("get", "Patient", "abc-123", "dr_chen"), fetcher)
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_ttl_zero_bypasses_cache_entirely():
+    cache = TtlSingleFlightCache(ttl_seconds=0, max_entries=10)
+    calls = 0
+
+    async def fetcher():
+        nonlocal calls
+        calls += 1
+        return {"v": calls}
+
+    a = await cache.get_or_fetch(("k",), fetcher)
+    b = await cache.get_or_fetch(("k",), fetcher)
+
+    # Both calls invoke the fetcher; nothing is cached.
+    assert a == {"v": 1}
+    assert b == {"v": 2}
+    assert calls == 2
