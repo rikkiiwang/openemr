@@ -48,4 +48,6 @@ class TtlSingleFlightCache:
         result = await fetcher()
         self._ttl[key] = (result, time.monotonic() + self._ttl_seconds)
         self._ttl.move_to_end(key)
+        while len(self._ttl) > self._max_entries:
+            self._ttl.popitem(last=False)  # evict LRU (oldest)
         return result

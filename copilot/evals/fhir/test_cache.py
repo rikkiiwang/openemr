@@ -57,3 +57,28 @@ async def test_ttl_miss_after_expiry_re_invokes_fetcher(monkeypatch):
     assert second == {"call": 1}  # cache hit
     assert third == {"call": 2}   # cache miss
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_lru_evicts_oldest_when_bound_exceeded():
+    cache = TtlSingleFlightCache(ttl_seconds=60, max_entries=2)
+    calls: dict[str, int] = {"a": 0, "b": 0, "c": 0}
+
+    def make_fetcher(name: str):
+        async def fetcher():
+            calls[name] += 1
+            return name
+        return fetcher
+
+    # Fill cache to bound.
+    await cache.get_or_fetch(("a",), make_fetcher("a"))
+    await cache.get_or_fetch(("b",), make_fetcher("b"))
+    # Adding ("c",) should evict ("a",) (LRU).
+    await cache.get_or_fetch(("c",), make_fetcher("c"))
+
+    # Re-fetching "a" should miss and re-invoke its fetcher.
+    await cache.get_or_fetch(("a",), make_fetcher("a"))
+
+    assert calls["a"] == 2  # Fetched again after eviction.
+    assert calls["b"] == 1
+    assert calls["c"] == 1
