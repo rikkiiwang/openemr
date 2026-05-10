@@ -7,15 +7,17 @@
 
 ---
 
-## TL;DR (status as of 2026-05-09 — memory bank refresh)
+## TL;DR (status as of 2026-05-10 — post-consolidation refresh)
 
-- **Master tip:** `30cd84d87` (W2 Final Cost & Latency Report). 83 commits ahead of W2 MVP `78d0672c7`; 23 commits ahead of last documented Phase 4 tip `35b7d1d7f`. Master holds **B14 v1** (cross-origin separate Railway service).
-- **Dashboard branch:** `feat/dashboard-modernize` at `2cedf50d6` — 52 commits ahead of master. Includes a **B14 architecture pivot from v1 (cross-origin) to v2 (same-origin co-resident via Apache mod_proxy)**. **User is still debugging v2** — treat the v2 details below as the as-coded snapshot, not confirmed working. Branch not yet pushed/merged.
+- **Master tip:** `7124c20dd` (B14 v2 consolidation complete — four squash-merges landed: PR #1 consolidate-dashboard, PR #2 callback basePath, PR #3 CSP middleware, PR #5 CopilotRail iframe path). The `agentforge-dashboard` Railway service is paused as the revert window.
+- **B14 LIVE topology:** single Railway container `refreshing-empathy/openemr` serves OpenEMR PHP at `/` AND the Next.js dashboard at `/modern/*` (Apache `mod_proxy` → loopback Node 22 on `:3000`). Same origin, same cookie jar — no SameSite=None / CSP frame-ancestors allowlist / build-time-baked CSP-fallback gymnastics. Verified end-to-end on Sun 2026-05-10 ≈ 01:00 PT (chooser → Modern → 6 cards + Co-Pilot rail render inside OpenEMR's frame; reception desk sees full patient finder).
+- **Dashboard branch `feat/dashboard-modernize` is now historical.** Its work is in master via PR #1's squash merge of integration branch `feat/consolidate-dashboard` (which itself merged dashboard-modernize). The three subsequent fix branches are likewise merged.
 - **Pushed to:** GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr` (master).
-- **Deployed:** Railway `openemr` + `copilot` services live. `dashboard` service pending user push of `feat/dashboard-modernize`.
-- **Quality at last full-suite verification (`35b7d1d7f`):** **192 tests passing** (3 skipped — pre-existing `live_llm`). `make eval-fast` **15/15 across all 6 PRD categories**. `ruff check .` clean. Bug-fix commits between `35b7d1d7f` and `30cd84d87` are scoped (no architectural changes).
-- **PRD hard gate:** the documented regression-repro recipe actually fires (`make eval-fast` exits 2 with `cross` dropping to 66.7% when `check_extracted_fact_has_source_doc` is commented). See `copilot/README.md` §"Verifying the W2 eval gate".
-- **Outstanding for W2 Final:** 3-5 min demo video; real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked, fail-soft applies); dense retrieval (current build is BM25 + identity-rerank).
+- **Deployed:** Railway `openemr` (with co-resident dashboard) + `copilot` live; `agentforge-dashboard` paused.
+- **Quality at last full-suite verification (`35b7d1d7f`):** **192 copilot tests + 186 dashboard tests** passing. `make eval-fast` **15/15 across all 6 PRD categories**. `ruff check .` clean.
+- **Latency optimization (2026-05-10):** FHIR per-tenant cache shipped (`copilot/app/fhir/cache.py`). 60s TTL keyed by `(resource, query, physician)`. Set `COPILOT_FHIR_CACHE_TTL_SECONDS=0` on the Railway `copilot` service to disable. Spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`. Plan: `docs/superpowers/plans/2026-05-10-fhir-cache.md`.
+- **PRD hard gate:** the documented regression-repro recipe still fires (`make eval-fast` exits 2 with `cross` dropping to 66.7% when `check_extracted_fact_has_source_doc` is commented). See `copilot/README.md` §"Verifying the W2 eval gate".
+- **Outstanding for W2 Final:** 3-5 min demo video; real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked, fail-soft applies); dense retrieval (current build is BM25 + identity-rerank); post-demo cleanup (delete paused `agentforge-dashboard` Railway project + four merged feature/fix branches on GitHub).
 
 ---
 
@@ -27,8 +29,8 @@
 | 2 | Early Submission (Tier 1 + Tier 2 LITE) + 8 codex rounds | 2026-05-06 → 2026-05-07 morning | `2cb643af9` | 163 → 174 | ✅ shipped |
 | 3 | Smoke-test polish (5 fixes) + regression-repro canary | 2026-05-07 | `f19f43514` | 174 (53/53) | ✅ shipped |
 | 4 | Front-desk arc + confirm/reject + modal viewer + panel-gate relaxes + bbox/OCR refinement | 2026-05-07 → 2026-05-09 | `30cd84d87` (master) | 192 (53/53) | ✅ shipped |
-| 5 | W2 Surprise Challenge — patient dashboard port + master-side OpenEMR integration | 2026-05-09 | `2cedf50d6` (dashboard branch) + `30cd84d87` (master integration) | 192 + 151 dashboard | ✅ shipped (port + integration); branch push pending |
-| 6 | W2 Final Submission — Cost & Latency Report shipped; demo video + dense retrieval + real FHIR write outstanding | Sun 2026-05-10 | `30cd84d87` | 192 | 🟡 partial |
+| 5 | W2 Surprise Challenge — patient dashboard port + master integration + B14 v2 consolidation | 2026-05-09 → 2026-05-10 | `7124c20dd` (master) | 192 copilot + 186 dashboard | ✅ shipped + verified live |
+| 6 | W2 Final Submission — Cost & Latency Report shipped; demo video + dense retrieval + real FHIR write outstanding | Sun 2026-05-10 | `7124c20dd` | 192 | 🟡 partial |
 
 ---
 
@@ -231,11 +233,29 @@ Night-shift run `2026-05-09-0213` shipped a Next.js 15 / React 19 / TypeScript p
 
 KR table (authoritative list in `.night-shift/runs/2026-05-09-0213/state.json`): KR2 (skeleton), KR4 (OAuth+FHIR proxy), KR5 (header + 6 cards), KR6 (Co-Pilot rail), KR7 (CI + defense doc + memory bank), KR8 (panel-scope authorization), KR9 (doc sync + fetch-rejection), KR10 (physician_user_id + logout CSRF), KR11 (Dockerfile + CSP), KR12-19 (doc accuracy passes after Codex rounds). KR1 + KR3 codex-rejected during proposal.
 
-### 5b — OpenEMR integration (architecture in active iteration; B14 v1 → v2 pivot)
+### 5b — OpenEMR integration (B14 v1 → v2 pivot, COMPLETE)
 
-**Status (2026-05-09 evening):** v1 (cross-origin separate Railway service) shipped on master between 2026-05-08 and 2026-05-09. v2 (same-origin co-resident via Apache mod_proxy) lives on `feat/dashboard-modernize` HEAD `2cedf50d6`. **User is still debugging v2** — the documented details are the as-coded snapshot, not confirmed working.
+**Status (2026-05-10):** v2 (same-origin co-resident via Apache mod_proxy) shipped, merged to master `7124c20dd`, deployed, and end-to-end verified live. v1 (cross-origin separate Railway service) is superseded; the `agentforge-dashboard` Railway service is paused as the revert window.
 
-#### v2 — same-origin co-resident (current, on `feat/dashboard-modernize`)
+**v2 merge sequence on master (Sun 2026-05-10):**
+
+| Squash-merge | PR | What landed |
+|---|---|---|
+| `81baf8186` | #1 (`feat/consolidate-dashboard`) | Multi-stage Dockerfile (`node:24-alpine` builder → `openemr/openemr` + `apk add nodejs` + `/opt/dashboard` standalone output + `dashboard-proxy.conf`); `railway-entrypoint.sh` forks Node before Apache; `frontend/next.config.ts` `basePath:"/modern"` + `assetPrefix:"/modern"`; reverts the v1 SameSite=None / cookie_secure=true sed; `interface/patient_file/summary/dashboard.php` Modern URL is now relative `/modern/api/auth/login?...` (no `DASHBOARD_URL` env read); `cookies.ts` SameSite=Lax-always; `csp.ts` drops `PROD_OPENEMR_ORIGIN_FALLBACK`; `PATIENT_DASHBOARD_MIGRATION.md` updated for single-container topology. |
+| `2cb818c43` | #2 (`fix/dashboard-callback-basepath`) | OAuth callback prepends basePath to `Location` (was `/patient/<uuid>`, now `/modern/patient/<uuid>` — without this, post-login Apache 404'd because `/patient/` had no ProxyPass match). `dashboard-proxy.conf` ProxyPass relaxed to match `/modern` AND `/modern/` AND `/modern/anything`. |
+| `4ec0f07b0` | #3 (`fix/csp-runtime-frame-src`) | New `frontend/middleware.ts` overrides `Content-Security-Policy` per-request using `process.env.COPILOT_URL`. Static `next.config.ts headers()` runs at build time and never sees runtime env, so v1's CSP `frame-src 'self'` blocked the iframe with "This content is blocked". Middleware reads live env and emits `frame-src 'self' https://copilot-production-b532.up.railway.app`. |
+| `7124c20dd` | #5 (`fix/copilot-rail-iframe-path`) | `CopilotRail.tsx` builds `${COPILOT_URL}/?patient_id=...` (was `/iframe?...`). The deployed Co-Pilot service serves the iframe shell at `/` (`copilot/app/main.py:117 @app.get("/")`); `/iframe` returns FastAPI's `{"detail":"Not Found"}`. |
+
+**Operational fixes (not in code) applied alongside the merges:**
+- OAuth client `Dashboard (Next.js)` `redirect_uri` updated to `…/modern/api/auth/callback`. The OpenEMR Admin form's JWKS validator rejects empty strings — workaround = type `[]` literally OR SQL `UPDATE oauth_clients SET redirect_uri = '[…]' WHERE …`.
+- OAuth client granted `user/Encounter.read` (was missing — the only failing card before the grant).
+- Railway env on the OpenEMR service: `DASHBOARD_PUBLIC_URL=https://…0c8c…/modern`, `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `SESSION_COOKIE_SECRET`, `COPILOT_URL=https://copilot-production-b532.up.railway.app`, `COPILOT_ADMIN_USERS=EPU-admin-46,Reception Desk` (front-desk username added so `copilot-finder-scope.php` and `copilot-demographics-gate.php` bypass for them too). Removed: `DASHBOARD_URL` (no longer read).
+
+**v2 verification (Sun 2026-05-10 ≈ 01:00 PT):**
+- `curl https://openemr-production-0c8c.up.railway.app/modern/api/health` → 200 with `Content-Security-Policy: ... frame-src 'self' https://copilot-production-b532.up.railway.app; frame-ancestors 'self'; ...`, `X-Frame-Options: SAMEORIGIN`, `Set-Cookie: oauth_state_pkce=...; SameSite=Lax; Secure` (no `None`).
+- Browser test (fresh incognito): log into OpenEMR → click patient → chooser → **Modern** → dashboard renders inside OpenEMR's frame at `…0c8c…/modern/patient/<uuid>`. URL bar stays on the OpenEMR origin throughout. All 6 cards load (incl. Encounters). Co-Pilot rail loads the chat panel (no JSON 404, no "blocked"). Reception desk login sees the full patient finder.
+
+#### v2 — same-origin co-resident (LIVE on master)
 
 The Next.js dashboard is **built into the same Railway container as OpenEMR** via a multi-stage Dockerfile. Apache `mod_proxy_http` forwards `/modern/*` → `127.0.0.1:3000` (Node 22). Same origin obviates all cross-origin workarounds.
 

@@ -1,16 +1,26 @@
 # Active Context
 
-**Last updated:** 2026-05-09 (memory bank refresh — reconciles to master @ `30cd84d87`. Master is **83 commits** ahead of W2 MVP `78d0672c7`; **23 commits** ahead of last documented Phase 4 tip `35b7d1d7f`. Dashboard port branch `feat/dashboard-modernize` is **52 commits** ahead of master.)
+**Last updated:** 2026-05-10 (consolidation v2 shipped + verified live. Master @ `7124c20dd` after four squash-merges:`81baf8186` consolidate-dashboard, `2cb818c43` callback basePath, `4ec0f07b0` CSP middleware, `7124c20dd` CopilotRail iframe path. The agentforge-dashboard Railway service is **paused** as the revert window; slated for delete after demo.)
 
 ## Where we are right now
 
-**On master (`30cd84d87`):**
-- All Phases 1–4 of W2 (`copilot/W2_IMPLEMENTATION.md`).
-- W2 Surprise Challenge: dashboard port itself stayed on `feat/dashboard-modernize`. Master has the patient-finder re-point + dashboard.php launcher commits (`0a49d038d`, `4b9f181a2`, `ad40380f3`, `cbeb2f03d`, `1d71642ec`, `77e4032fc`, `a0fa9b252`, `0e29e0aac`). At master tip, the dashboard is configured as a separate Railway service (B14 v1) with cross-origin cookie/CSP gymnastics.
-- W2 Final partial: Cost & Latency Report (`30cd84d87`) — `copilot/COST.md` §§8-9 backed by live Railway p50/p95 data captured via `copilot/scripts/bench_latency.py`.
-- Bug-class fixes between `35b7d1d7f` and `30cd84d87`: confirm/reject closure mutation, bbox overlay tightening (multi-token snap, row expansion, OCR re-snap on cache hit), `.gitignore` for `.night-shift/` + `.claude/`. None of these introduce new architectural surface.
+**On master (`7124c20dd`) — B14 v2 LIVE:** the consolidated single-container architecture is deployed and end-to-end verified. The Next.js dashboard runs as a co-resident Node process inside OpenEMR's Apache container; mod_proxy forwards `/modern/*` → `127.0.0.1:3000`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist needed for the embed. Confirmed working in production:
+- `https://openemr-production-0c8c.up.railway.app/modern/api/health` returns 200 with clean headers (`frame-ancestors 'self'`, `x-frame-options: SAMEORIGIN`, `set-cookie SameSite=Lax + Secure`).
+- Modern click in patient finder → chooser → dashboard renders inside OpenEMR's frame at `…0c8c…/modern/patient/<uuid>`. URL bar stays on the OpenEMR origin throughout.
+- All 6 cards render (Encounters fixed by granting `user/Encounter.read` on the OAuth client — was previously missing).
+- Co-Pilot rail loads the chat panel (CopilotRail iframe URL fixed: was `/iframe?...`, now `/?...` — the deployed Co-Pilot serves the shell at root, not `/iframe`).
+- Reception desk login sees the full patient finder once their username is added to `COPILOT_ADMIN_USERS` (the same env that bypasses the legacy `copilot-finder-scope.php` and `copilot-demographics-gate.php` hand-rolled gates).
 
-**On `feat/dashboard-modernize` (`2cedf50d6`) — architecture in active iteration:** the dashboard port itself plus 52 commits over master. **The branch has pivoted from the cross-origin separate-service architecture (B14 v1) to a same-origin co-resident architecture (B14 v2)** where the Next.js dashboard is built into the same OpenEMR Apache container and served via `mod_proxy_http` at `/modern/*`. Multi-stage `Dockerfile` builds `frontend/` → `.next/standalone` and drops it into `/opt/dashboard`; `dashboard-proxy.conf` forwards `/modern/*` → `127.0.0.1:3000`; Next.js uses `basePath: "/modern"`. This obviates the cross-origin workarounds (CSP frame-ancestors allowlist, SameSite=None cookies, upstream session-cookie samesite-Lax flip). User is **still debugging** this architecture — treat documented details as the as-coded snapshot, not as confirmed working. Branch is **not yet pushed/merged** — user owns the merge.
+**Master commits in this consolidation arc (latest first):**
+- `7124c20dd` (PR #5) — fix(dashboard): CopilotRail iframe path is "/" not "/iframe"
+- `4ec0f07b0` (PR #3) — fix(dashboard): override CSP via middleware so COPILOT_URL is read at runtime (`frontend/middleware.ts` per-request CSP, replacing the build-time `next.config.ts headers()` baked-in approach for `frame-src`)
+- `2cb818c43` (PR #2) — fix(dashboard): prepend basePath to OAuth callback Location + relax mod_proxy match (callback redirects use `/modern/<next>` not bare `/<next>`; `dashboard-proxy.conf` matches `/modern` AND `/modern/`)
+- `81baf8186` (PR #1) — feat(dashboard): co-host modern dashboard inside OpenEMR container (multi-stage Dockerfile + `apk add nodejs` + `/opt/dashboard` + `dashboard-proxy.conf` + `railway-entrypoint.sh` Node fork; `frontend/next.config.ts` `basePath:"/modern"`; reverts the SameSite=None / cookie_secure sed; `interface/patient_file/summary/dashboard.php` uses relative `/modern/...` URL)
+- `7f5b29adc` — docs(memory-bank): note B14 v2 same-origin dashboard pivot (in-flight) [the "in-flight" caveat is now stale; this update closes it]
+
+**Phases 1–4 of W2 unchanged** (`copilot/W2_IMPLEMENTATION.md`). W2 Final partial: Cost & Latency Report shipped earlier on master; the consolidation pivot is technically Phase 5 cleanup, not a Final-scope item.
+
+**`feat/dashboard-modernize` (`2cedf50d6`) is now historical** — its work is in master via PR #1's squash merge of `feat/consolidate-dashboard` (which itself merged dashboard-modernize into a fresh integration branch off master). Safe to delete the feature branch and the three subsequent fix branches (`fix/dashboard-callback-basepath`, `fix/csp-runtime-frame-src`, `fix/copilot-rail-iframe-path`) on GitHub.
 
 **Outstanding for W2 Final (Sun 2026-05-10 noon CT):**
 1. **3-5 min demo video** — user owns capture.
@@ -77,8 +87,8 @@ Spec read and digested: `~/Desktop/Gauntlet/Week2/Week 2 - AgentForge Clinical C
 | MVP (Tue 2026-05-05) | ✅ shipped, demoable end-to-end | All 14 tasks of `W2_IMPLEMENTATION.md` landed. Deployed at `https://copilot-production-b532.up.railway.app`. 75 tests passing (W1: 42 + W2 MVP: 33). Master tip `78d0672c7`. |
 | Early Submission (Thu ≈ 2026-05-07) | ✅ shipped + polished + canary-verified | Tier 1 + Tier 2-lite + 4 polish KRs landed via night-shift `2026-05-06-0104`; 8 codex rounds closed 18 findings; 4-phase smoke-test polish sweep on 2026-05-07. Working regression-repro shipped at `f19f43514`. 174 tests / 53/53 eval cases. |
 | Front-desk arc + UX (2026-05-07 → 2026-05-08) | ✅ shipped on master | Phase 4 in `W2_IMPLEMENTATION.md`. Deferred-extraction upload path (`5e63e5fb9`); confirm/reject UX + persistence fix (`c2534e416`); panel-gate empty-GP fall-through (`37331e54b`); modal viewer rail-expand + zoom (`196d75e61`); env panel demoted to advisory (`35b7d1d7f`). 192 tests. |
-| Surprise Challenge (dashboard port) | ✅ shipped on `feat/dashboard-modernize` | 151 unit tests, defense doc at `PATIENT_DASHBOARD_MIGRATION.md`. Branch tip `2cedf50d6`. Not yet pushed/merged to master. |
-| Surprise Challenge integration (master) | ✅ shipped 2026-05-09 | `dashboard.php` launcher + finder re-point + EHR-launch silent SSO + iframe-embed CSP. Pattern B14 in `systemPatterns.md`. Master tip `30cd84d87`. |
+| Surprise Challenge (dashboard port) | ✅ shipped + merged to master | 186 unit tests; defense doc `PATIENT_DASHBOARD_MIGRATION.md` updated to reflect single-container architecture. |
+| Surprise Challenge integration (master) | ✅ shipped 2026-05-09 (v1) → consolidated 2026-05-10 (v2) | v2 LIVE: same-origin co-resident architecture. `dashboard.php` chooser uses relative `/modern/...`; multi-stage Dockerfile builds `/opt/dashboard`; Apache `mod_proxy` fronts loopback Node. Pattern B14 in `systemPatterns.md`. Master tip `7124c20dd`. |
 | Final (Sun ≈ 2026-05-10 noon) | 🟡 partial | ✅ Cost & Latency Report (`30cd84d87`); 📋 demo video; 📋 real `POST /fhir/DocumentReference` (R4 has no route — Plan B blocked on `api:oemr` scope); 📋 dense retrieval (BM25 + identity-rerank shipped). |
 
 ---
@@ -89,10 +99,10 @@ Phases 1–5 of W2 are shipped on master (`30cd84d87`). The dashboard port is sh
 
 **Remaining work (in priority order, Sun 2026-05-10 noon CT deadline):**
 
-1. **Demo video (3-5 min)** — required by PRD. User owns capture. The demo path that holds up: drop a lab PDF → "Extracted N facts" → ask "What was the LDL?" → grounded answer with bbox-modal citation → ask "what's new for this patient?" → agent uses `get_recent_uploads(confirmed_only=true)` → finder click in OpenEMR launches Modern dashboard with Co-Pilot rail.
-2. **Push `feat/dashboard-modernize` to master** if user is ready for the dashboard prod URL to flip. The 52 sync/fix commits over master are mostly cookie/CSP fixes for prod iframe-embed; safe to merge.
-3. **Decide Plan B REST scope fix path** — option A (add `api:oemr` to OAuth scopes; ~30 min, real risk if OAuth client isn't configured for it), option B (demote Confirm to local-only; ~10 min, zero risk), option C (cosmetic-only message reword; ~5 min). User has not chosen. Default to C for the demo, with A as follow-on if grading time allows.
-4. **Optional: dense retrieval** — embedding store + dense scoring on top of the existing `Reranker` Protocol scaffolding. Defensible as-shipped but a literal PRD reading is unmet.
+1. **Demo video (3-5 min)** — required by PRD. User owns capture. The demo path that holds up: drop a lab PDF → "Extracted N facts" → ask "What was the LDL?" → grounded answer with bbox-modal citation → ask "what's new for this patient?" → agent uses `get_recent_uploads(confirmed_only=true)` → finder click in OpenEMR launches Modern dashboard *inside the same OpenEMR frame at /modern/* with Co-Pilot rail.
+2. **Decide Plan B REST scope fix path** — option A (add `api:oemr` to OAuth scopes; ~30 min, real risk if OAuth client isn't configured for it), option B (demote Confirm to local-only; ~10 min, zero risk), option C (cosmetic-only message reword; ~5 min). User has not chosen. Default to C for the demo, with A as follow-on if grading time allows.
+3. **Optional: dense retrieval** — embedding store + dense scoring on top of the existing `Reranker` Protocol scaffolding. Defensible as-shipped but a literal PRD reading is unmet.
+4. **Cleanup (post-demo):** delete the paused `agentforge-dashboard` Railway project; delete the four merged feature/fix branches on GitHub.
 
 **Run pointers (historical):**
 - Night-shift `2026-05-06-0104` (Early Submission) — `.night-shift/runs/2026-05-06-0104/`
@@ -125,11 +135,12 @@ Full details in `assignments/week1.md §6` and `progress.md` known-issues table.
 
 ## Branch + remote state
 
-- `master` — W2 Phases 1–5 + Final partial (`30cd84d87`). 83 commits ahead of W2 MVP `78d0672c7`. Pushed to both GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr` (presumed current; verify with `git status` if uncertain).
-- `feat/dashboard-modernize` — Surprise Challenge port + master sync commits (`2cedf50d6`). 115 ahead of `78d0672c7`, 52 ahead of master. Includes prod-only frontend fixes (cookie `SameSite=None`/`Secure`, CSP `frame-ancestors` hardcoded fallback). **Not yet pushed/merged** — user owns this.
+- `master` — W2 Phases 1–5 + Final partial + B14 v2 consolidation (`7124c20dd`). Pushed to both GitHub `rikkiiwang/openemr` and GitLab `labs.gauntletai.com/ruijingwang/openemr`.
+- `feat/dashboard-modernize` (`2cedf50d6`) — historical; squash-merged into master via `feat/consolidate-dashboard` → PR #1 → master. Safe to delete.
+- `fix/dashboard-callback-basepath`, `fix/csp-runtime-frame-src`, `fix/copilot-rail-iframe-path` — historical; squash-merged via PRs #2/#3/#5. Safe to delete.
 - `feat/w2-early-submission` — historical; merged into master. Tip was `35b7d1d7f` at last documented checkpoint.
 - `w2-mvp` — fast-forward merged into master long ago and the tag was deleted.
-- Remotes: `origin` (multi-push: both GitHub + GitLab). To push to one only, use the full URL: `git push https://labs.gauntletai.com/ruijingwang/openemr.git master`. Railway's source-connection is GitHub `rikkiiwang/openemr` master, so a GitLab-only push does NOT trigger a redeploy. **Dashboard service auto-deploys from GitHub `rikkiiwang/openemr` `feat/dashboard-modernize`** (or whichever branch/path the new Railway dashboard service is wired to — verify in Railway UI).
+- Remotes: `origin` (multi-push: both GitHub + GitLab). To push to one only, use the full URL: `git push https://labs.gauntletai.com/ruijingwang/openemr.git master`. Railway's source-connection is GitHub `rikkiiwang/openemr` master, so a GitLab-only push does NOT trigger a redeploy. **Single deployable service for the dashboard now — `refreshing-empathy/openemr` serves both `/` (legacy PHP) and `/modern/*` (Next.js). The `agentforge-dashboard` project's service is paused and will be deleted post-demo.**
 
 ---
 

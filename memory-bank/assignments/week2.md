@@ -252,14 +252,18 @@ Mix of PDF + PNG forces the format-agnostic dispatch (`mime_type` distinct from 
 
 **Codex review state:** Tasks under KR2 + KR4 went through 1-6 rounds of `codex review` each (clean after iterations — see per-task `code-review.txt`). Codex hit usage limit at ~03:50 PT (try again at 7:15 AM); KR4 task 4 round 6 + all subsequent KR/decomp/code reviews use rigorous self-adversarial reviews per skill protocol. All `code-review.txt` files headered `CODEX UNAVAILABLE — SELF-REVIEW` for the affected tasks.
 
-**Status (updated 2026-05-09):** Dashboard port branch `feat/dashboard-modernize` (HEAD `2cedf50d6`) is shippable. **Branch itself not yet pushed/merged**, but the **master-side integration shipped** at `30cd84d87` — `dashboard.php` launcher (`0a49d038d`), Dockerfile injection (`4b9f181a2`), EHR-launch silent SSO (`ad40380f3`), and iframe-embed CSP (`a0fa9b252`). See `progress.md` Phase 5 for the commit catalog. Pattern documented as B14 in `systemPatterns.md`.
+**Status (updated 2026-05-10):** Dashboard port shipped, merged to master, and **consolidated into OpenEMR's container (B14 v2)** — same-origin co-resident architecture is LIVE on master `7124c20dd`. Verified end-to-end: chooser → Modern → dashboard renders inside OpenEMR's frame at `…0c8c…/modern/patient/<uuid>` with all 6 cards + Co-Pilot rail. The v1 cross-origin separate-service architecture is superseded; the `agentforge-dashboard` Railway service is paused as the revert window (delete after demo). 186 dashboard unit tests / `PATIENT_DASHBOARD_MIGRATION.md` updated for single-container topology. See `progress.md` Phase 5 + `systemPatterns.md` B14 for the catalog.
 
-**Manual steps the night-shift agent could not perform (still left for user — these are the final go-live steps):**
-1. `git push origin feat/dashboard-modernize` to GitHub so Railway auto-deploys the dashboard service.
-2. Merge `feat/dashboard-modernize` → master once dashboard service is verified live.
-3. Register a confidential OAuth2 client in OpenEMR Admin → System → API Clients with redirect_uri = `https://<dashboard-railway-url>/api/auth/callback`. Client must be permitted to mint scopes including `launch` (for EHR-launch silent SSO).
-4. Set `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `DASHBOARD_PUBLIC_URL`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `COPILOT_URL`, `SESSION_COOKIE_SECRET`, `OPENEMR_VERIFY_TLS` env on the new Railway `dashboard` service.
-5. Set `DASHBOARD_URL=<dashboard-railway-url>` env on the existing Railway `openemr` service so the patient-finder click is re-pointed (B14). When unset, finder click falls back transparently to legacy `demographics.php`.
+**Done (final go-live, 2026-05-10):**
+- ✅ `feat/dashboard-modernize` merged to master via integration branch `feat/consolidate-dashboard` (PR #1, squash → `81baf8186`).
+- ✅ Three follow-on hot-fixes merged (PR #2 callback basePath → `2cb818c43`; PR #3 CSP middleware → `4ec0f07b0`; PR #5 CopilotRail iframe path → `7124c20dd`).
+- ✅ OAuth client `Dashboard (Next.js)` registered in OpenEMR Admin with `redirect_uri = https://openemr-production-0c8c.up.railway.app/modern/api/auth/callback` and full scope set including `user/Encounter.read`. (JWKS-field-validator workaround: type `[]` literally, OR SQL on `oauth_clients`.)
+- ✅ Railway env on `refreshing-empathy/openemr`: `DASHBOARD_PUBLIC_URL=…/modern`, `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `SESSION_COOKIE_SECRET`, `COPILOT_URL=https://copilot-production-b532.up.railway.app`, `COPILOT_ADMIN_USERS=EPU-admin-46,Reception Desk` (front-desk username added so the legacy gates also bypass for them).
+- ✅ Old `agentforge-dashboard` Railway service paused.
+
+**Remaining cleanup (post-demo):**
+1. Delete the paused `agentforge-dashboard` Railway project entirely.
+2. Delete the four merged feature/fix branches on GitHub: `feat/dashboard-modernize`, `feat/consolidate-dashboard`, `fix/dashboard-callback-basepath`, `fix/csp-runtime-frame-src`, `fix/copilot-rail-iframe-path`.
 6. Smoke-test: in OpenEMR, click a Synthea patient → finder loads view chooser → click "Open in Modern Dashboard" → silent SSO → all 6 cards render + Co-Pilot iframe loads. Re-test with the user already authenticated to verify EHR-launch fast-path skips login screens.
 
 ---

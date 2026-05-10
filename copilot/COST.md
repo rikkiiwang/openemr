@@ -339,3 +339,41 @@ post-deploy gives apples-to-apples deltas. ~$0.30 per full pass.
 ---
 
 *Maintained alongside ARCHITECTURE.md §9. Update §2 measurements after any change to system prompt, tool definitions, or PHI minimizer; update §4 projections after any pricing change; re-run §8 (`scripts/bench_latency.py`) after any change to the FHIR proxy, supervisor routing, or tool registry.*
+
+---
+
+## §10 — FHIR per-tenant cache (added 2026-05-10)
+
+Implements §9's "highest-leverage performance lever." In-process
+`TtlSingleFlightCache` (60s TTL, LRU bound 1000) wraps
+`FhirClient.get_resource` and `search`. Writes bypass.
+
+**Expected impact** (against the §8 baseline):
+
+| Use case | Before (p50) | After (p50, second turn) |
+|---|---|---|
+| UC1 brief | 18.2s | ~3-5s |
+| UC2 meds | 10.0s | ~2-3s |
+| UC3 applied guideline | 11.8s | ~3-5s |
+
+First turn after iframe open still pays full FHIR cost (cache cold).
+Every subsequent turn within 60s hits cache for resources already
+fetched. Within-turn concurrent dispatches share a single upstream
+fetch via the in-flight Promise cache.
+
+**Configuration** (env on the `copilot` Railway service):
+
+- `COPILOT_FHIR_CACHE_TTL_SECONDS` — default `60`. Set to `0` to disable
+  the cache entirely (kill-switch, no redeploy needed).
+- `COPILOT_FHIR_CACHE_MAX_ENTRIES` — default `1000`. Bumpable if memory
+  is not the constraint.
+
+**Panel-scope safety:** cache key includes `physician_user_id`, so two
+physicians fetching the same patient produce different cache entries.
+Verified by `test_two_physicians_get_separate_cache_entries`.
+
+**Out of scope:** cache invalidation on write (60s TTL absorbs);
+shared/Redis cache (single-replica only); per-resource TTL tuning
+(uniform 60s); streaming / TTFT (verification contract precludes).
+
+See design spec: `docs/superpowers/specs/2026-05-10-fhir-cache-design.md`.

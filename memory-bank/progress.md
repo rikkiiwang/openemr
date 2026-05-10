@@ -1,6 +1,6 @@
 # Progress
 
-**Last reviewed:** 2026-05-09 (memory bank refresh — reconciles against master @ `30cd84d87`; supersedes the 2026-05-09 dashboard-port-only entry which left master-side cost/latency report + dashboard↔OpenEMR finder integration undocumented)
+**Last reviewed:** 2026-05-10 (post-consolidation refresh — reconciles against master @ `7124c20dd` after the four squash-merges that landed B14 v2: PR #1 consolidate-dashboard, PR #2 callback basePath, PR #3 CSP middleware, PR #5 CopilotRail iframe path. Phase 5 v2 promoted from "in active iteration" to "shipped + verified". Also refreshes the Cross-week summary and Phase 5 sections accordingly.)
 
 ---
 
@@ -9,7 +9,7 @@
 | Week | Window | State |
 |---|---|---|
 | Week 1 | 2026-04-21 → 2026-05-04 | ✅ Complete — all four checkpoints submitted, all AI Interviews completed (closed 2026-05-05) |
-| Week 2 | 2026-05-04 → 2026-05-10 | 🟢 Phases 1–4 fully shipped on master (`30cd84d87`, **83 commits ahead** of `78d0672c7` MVP tip); W2 Surprise Challenge dashboard port shipped on `feat/dashboard-modernize` (HEAD `2cedf50d6`, 115 commits ahead of `78d0672c7`, 52 ahead of master) and **integrated into OpenEMR's patient-finder click flow on master** via `0a49d038d` + `4b9f181a2` + `ad40380f3` (pattern B14 in `systemPatterns.md`). W2 Final Cost & Latency Report shipped at `30cd84d87` with `scripts/bench_latency.py` capturing live p50/p95 across 15 turns. **192 tests / 53/53 eval cases** at last verification (`35b7d1d7f`); master fixes since are bug-class only and tracked in `W2_IMPLEMENTATION.md` Phase 4. The deferred Documents-tab UI item is closed (front-desk routes through iframe drop-zone with a defer flag — `5e63e5fb9`). Confirm/Reject UX + OpenEMR REST write-back + persistence fix shipped at `c2534e416`. Outstanding W2 Final items: 3-5 min demo video, real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked), dense retrieval (currently BM25 + identity-rerank). |
+| Week 2 | 2026-05-04 → 2026-05-10 | 🟢 Phases 1–5 fully shipped on master (`7124c20dd`); B14 v2 consolidation deployed + verified end-to-end on Sun 2026-05-10 ≈ 01:00 PT. Single Railway container now serves OpenEMR at `/` and the Next.js dashboard at `/modern/*` via Apache mod_proxy. The cross-origin v1 architecture is superseded; `agentforge-dashboard` Railway service is paused as the revert window. **186 dashboard tests / 53/53 eval cases.** Outstanding W2 Final items: 3-5 min demo video, real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked), dense retrieval (currently BM25 + identity-rerank). |
 | Week 3+ | TBD | 📋 Not started |
 
 ---
@@ -367,9 +367,22 @@ night-shift run `2026-05-09-0213`. Not yet merged/pushed.
 
 ## ✅ Phase 5 — Dashboard ↔ OpenEMR finder integration + EHR-launch silent SSO
 
-**Architecture is in active iteration.** Two revisions exist — v1 (cross-origin separate Railway service) shipped on master between 2026-05-08 and 2026-05-09; v2 (same-origin co-resident via mod_proxy) lives on `feat/dashboard-modernize` as of 2026-05-09 evening. **User is still debugging v2** — treat the v2 description as the as-coded snapshot, not as confirmed working. See `systemPatterns.md` B14 for both revisions.
+**Architecture finalized 2026-05-10.** v2 (same-origin co-resident via Apache mod_proxy) is shipped, merged to master, deployed to Railway, and end-to-end verified. v1 (cross-origin separate Railway service) is superseded; the `agentforge-dashboard` Railway service is paused as the revert window. See `systemPatterns.md` B14.
 
-### v2 (current, on `feat/dashboard-modernize` HEAD `2cedf50d6`) — same-origin co-resident
+**v2 merge sequence on master (Sun 2026-05-10):**
+- `81baf8186` (PR #1, squash of `feat/consolidate-dashboard`) — multi-stage Dockerfile + Apache mod_proxy + entrypoint Node fork + reverts SameSite=None hacks + dashboard.php uses `/modern/...`.
+- `2cb818c43` (PR #2, squash of `fix/dashboard-callback-basepath`) — OAuth callback prepends `/modern` to Location; `dashboard-proxy.conf` matches `/modern` AND `/modern/`.
+- `4ec0f07b0` (PR #3, squash of `fix/csp-runtime-frame-src`) — `frontend/middleware.ts` overrides CSP per-request so runtime `COPILOT_URL` reaches `frame-src` (build-time `next.config.ts headers()` couldn't see it).
+- `7124c20dd` (PR #5, squash of `fix/copilot-rail-iframe-path`) — CopilotRail src changed from `${COPILOT_URL}/iframe?...` to `${COPILOT_URL}/?...` (the deployed Co-Pilot serves the iframe shell at `/`, not `/iframe`).
+
+**Operational fixes applied alongside the merges (not in code):**
+- OAuth client `Dashboard (Next.js)`: `redirect_uri` updated to `…/modern/api/auth/callback`. The `jwks` field validator rejects empty strings (form-bug); workaround = type `[]` literally.
+- OAuth client: granted `user/Encounter.read` (was missing — the only failing card before the grant).
+- Railway env on the OpenEMR service: `DASHBOARD_PUBLIC_URL=https://openemr-production-0c8c.up.railway.app/modern`, `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `SESSION_COOKIE_SECRET`, `COPILOT_URL=https://copilot-production-b532.up.railway.app`, `COPILOT_ADMIN_USERS=EPU-admin-46,Reception Desk` (front-desk username added so the legacy gate bypasses for them too). Removed: `DASHBOARD_URL` (no longer read).
+
+**v2 verification (Sun 2026-05-10 ≈ 01:00 PT):** `curl https://openemr-production-0c8c.up.railway.app/modern/api/health` → 200 with `frame-src 'self' https://copilot-production-b532.up.railway.app`, `frame-ancestors 'self'`, `x-frame-options: SAMEORIGIN`, `set-cookie SameSite=Lax + Secure`. Browser test: chooser → Modern → all 6 cards + Co-Pilot rail render inside OpenEMR's frame. Reception desk login sees full patient finder.
+
+### v2 — same-origin co-resident (LIVE on master `7124c20dd`)
 
 The Next.js dashboard now runs **inside the same Railway container as OpenEMR**. Multi-stage `Dockerfile`:
 
@@ -395,7 +408,7 @@ The Next.js dashboard now runs **inside the same Railway container as OpenEMR**.
 5. `/modern/api/auth/callback` exchanges code → access/refresh/id_token, stores in module-scope `tokenStore` keyed by sessionId, sets signed `dashboard_session` cookie (8h TTL), 302s to `next=/patient/<uuid>`.
 6. `/modern/patient/[id]/page.tsx` (server component) calls `fhirGet<Patient>` → `/modern/api/fhir/[...path]/route.ts` proxy forwards to upstream FHIR with bearer token + panel-scope gate (mirrors Co-Pilot's empty-GP fallthrough). Renders 6 cards + `CopilotRail` (sandboxed iframe pointing at the Co-Pilot service).
 
-### v1 (superseded, still on master `30cd84d87`) — cross-origin separate Railway service
+### v1 (superseded as of 2026-05-10) — cross-origin separate Railway service
 
 | Commit | What landed |
 |---|---|
