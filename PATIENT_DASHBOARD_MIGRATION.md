@@ -56,14 +56,18 @@ Surface delivered by the new tree under `frontend/`:
   the loopback Node process. The standalone `frontend/Dockerfile` is
   retained as a fallback during the revert window and slated for
   deletion after the demo.
-- **Security response headers** via `next.config.ts headers()`:
-  Content-Security-Policy (default-src 'self', script-src 'self'
-  'unsafe-inline' for React 19 RSC streaming, style-src 'self'
-  'unsafe-inline' for Tailwind v4, frame-src 'self' + COPILOT_URL
-  origin, frame-ancestors 'self' for the same-origin embed,
-  object-src 'none'), X-Content-Type-Options nosniff, Referrer-Policy
+- **Security response headers** via `next.config.ts headers()` (static)
+  + `frontend/middleware.ts` (per-request CSP override): the static
+  baseline ships X-Content-Type-Options nosniff, Referrer-Policy
   strict-origin-when-cross-origin, X-Frame-Options SAMEORIGIN,
-  Permissions-Policy disabling camera/mic/geo.
+  Permissions-Policy disabling camera/mic/geo, plus a CSP with
+  default-src 'self', script-src 'self' 'unsafe-inline' (React 19 RSC
+  streaming), style-src 'self' 'unsafe-inline' (Tailwind v4),
+  frame-ancestors 'self' (same-origin embed), object-src 'none'.
+  Middleware then overrides the CSP per-request to inject the runtime
+  COPILOT_URL into frame-src — `next.config.ts headers()` runs at build
+  time so runtime env vars never reach it; middleware does, and lets
+  config flow through without rebuilds.
 - Patient view: `/patient/[id]` rendering the **patient header** (name,
   DOB, sex, MRN, active status) + the **six required clinical cards**
   (Allergies, Problem List, Medications, Prescriptions, Care Team) plus
@@ -73,7 +77,7 @@ Surface delivered by the new tree under `frontend/`:
   hint to navigate to `/patient/<id>` when logged in.
 - Health probe: `/api/health` returning a static placeholder shape (real
   reachability check is Final-scope).
-- 151 vitest unit tests across 16 files.
+- 186 vitest unit tests across 20 files.
 
 ## 2. Why Next.js 15 (App Router) + React 19 + TypeScript
 
@@ -186,7 +190,7 @@ The same pattern reproduces for the next surfaces in priority order:
 │  │ /modern/patient/{id}         │  │ (separate Railway      │  │
 │  │  ├ <PatientHeader/>          │  │  service, W1/W2 code)  │  │
 │  │  ├ Allergies / Problems /    │◀─┤ <iframe src=           │  │
-│  │  │  Medications /            │  │  COPILOT_URL/iframe?   │  │
+│  │  │  Medications /            │  │  COPILOT_URL/?         │  │
 │  │  │  Prescriptions /          │  │  patient_id=...        │  │
 │  │  │  CareTeam / Encounters    │  └────────────────────────┘  │
 │  └────────────┬─────────────────┘                              │
@@ -228,7 +232,7 @@ npm run dev                     # turbopack dev server on :3000
 # In another shell:
 npm run lint                    # ESLint flat config
 npm run typecheck               # next typegen && tsc --noEmit
-npm run test                    # vitest run (151 unit tests)
+npm run test                    # vitest run (186 unit tests)
 npm run build                   # production build
 npm run start                   # serve the production build
 ```
@@ -255,7 +259,7 @@ frontend/
 ├── lib/
 │   ├── auth/{pkce,cookies,token-store}.ts          # PKCE, signed cookies, single-flight refresh
 │   └── fhir/{types,client,bundle,patient-name,upstream-url}.ts
-├── tests/unit/                                     # 151 tests
+├── tests/unit/                                     # 186 tests
 ├── package.json, package-lock.json                 # direct deps pinned exact (the one exception is `eslint`, left as `^9` so eslint-config-next can peer-resolve it)
 ├── tsconfig.json, next.config.ts, eslint.config.mjs, postcss.config.mjs
 ├── vitest.config.ts                                # @vitejs/plugin-react + tsx tests
@@ -276,25 +280,34 @@ inside that same proxy verifies that every patient-targeting request
 matches the signed-in clinician's general practitioner (admin-bypass +
 empty-GP fallthrough mirroring the Co-Pilot's working semantics).
 Defense-in-depth response headers (CSP locking down script/object/frame
-sources, frame-ancestors deny, Permissions-Policy locking down
-camera/mic/geo) are applied to every route. Sign-in goes through
-PKCE + signed cookie + httpOnly session; sign-out is a `<form>` POST
-that SameSite=Lax cookie+method blocks from being CSRF'd. The framework
-choice is Next.js because it gives all those patterns (Route Handlers
-in Node runtime with httpOnly session cookie + module-scope token
-store + module-scope panel-scope decision cache + config-level header
-hooks) as first-class primitives, and because Server Components let
+sources, frame-ancestors `'self'` for the same-origin embed,
+Permissions-Policy locking down camera/mic/geo) are applied to every
+route — the static baseline via `next.config.ts headers()` and the
+runtime-config-dependent CSP via `frontend/middleware.ts` (because
+`headers()` runs at build time and Railway runtime env vars never
+reach it). Sign-in goes through PKCE + signed cookie + httpOnly
+session; sign-out is a `<form>` POST that SameSite=Lax cookie+method
+blocks from being CSRF'd. The framework choice is Next.js because it
+gives all those patterns (Route Handlers in Node runtime with httpOnly
+session cookie + module-scope token store + module-scope panel-scope
+decision cache + per-request middleware for runtime-aware response
+headers) as first-class primitives, and because Server Components let
 the patient page compose seven parallel FHIR fetches (Patient + 6
 cards) without a client-side waterfall. The PHP backend is untouched;
 all six required cards plus Encounters render against unmodified
 `apis/dispatch.php` endpoints. The Co-Pilot rail is embedded as a
 sandboxed iframe carrying the signed-in clinician's username so the
-agent's panel-scope check matches. A multi-stage `node:24-alpine`
-Dockerfile + Next standalone output ships the runtime image. 151
-vitest unit tests cover the auth helpers, signed cookies, FHIR proxy,
-URL traversal protection, patient-name parsing, identifier matching,
-panel-scope decisions, ID-token decode, CSP construction, and the
-Co-Pilot rail's URL building. Items intentionally deferred (real
+agent's panel-scope check matches. The dashboard is **co-hosted inside
+OpenEMR's Apache container** — a `node:24-alpine` build stage compiles
+the Next standalone output, then `apk add nodejs` and `COPY --from=...
+/opt/dashboard` drop it into the openemr image; `dashboard-proxy.conf`
+forwards `/modern/*` to the loopback Node process. Same origin = same
+cookie jar, no SameSite=None workarounds, no CSP frame-ancestors
+allowlist. 186 vitest unit tests cover the auth helpers, signed
+cookies, FHIR proxy, URL traversal protection, patient-name parsing,
+identifier matching, panel-scope decisions, ID-token decode, CSP
+construction, the runtime-CSP middleware, the basePath-aware OAuth
+callback, and the Co-Pilot rail's URL building. Items intentionally deferred (real
 e2e against a live OpenEMR, front-desk facility scope, the patient
 finder, edit forms) are listed above so future work has a clear
 pickup list.
