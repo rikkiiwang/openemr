@@ -185,7 +185,6 @@ async def test_fhir_panel_allows_when_general_practitioner_empty(fhir, monkeypat
     Regression test for the 2026-05-08 'doctors in scope can't see
     pending intakes' bug.
     """
-    from app.config import Settings
     from app.main import _verify_patient_in_panel
 
     settings = get_settings()
@@ -265,7 +264,6 @@ async def test_fhir_panel_still_denies_when_general_practitioner_lists_others(
     clinician, deny — preserves the original tight semantics for any
     OpenEMR install where the field is wired up.
     """
-    from app.config import Settings
     from app.main import _verify_patient_in_panel
     from fastapi import HTTPException
 
