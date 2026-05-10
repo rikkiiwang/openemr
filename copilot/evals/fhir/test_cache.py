@@ -106,3 +106,48 @@ async def test_single_flight_concurrent_misses_share_one_fetch():
     assert a == {"shared": True}
     assert b == {"shared": True}
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_fetcher_error_propagates_and_does_not_cache():
+    cache = TtlSingleFlightCache(ttl_seconds=60, max_entries=10)
+    calls = 0
+
+    async def boom():
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("upstream blew up")
+
+    with pytest.raises(RuntimeError, match="upstream blew up"):
+        await cache.get_or_fetch(("k",), boom)
+
+    # Subsequent calls should re-invoke the fetcher (key was NOT cached).
+    with pytest.raises(RuntimeError, match="upstream blew up"):
+        await cache.get_or_fetch(("k",), boom)
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_fetcher_error_propagates_to_concurrent_awaiters():
+    import asyncio
+
+    cache = TtlSingleFlightCache(ttl_seconds=60, max_entries=10)
+    calls = 0
+
+    async def slow_boom():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)
+        raise RuntimeError("slow boom")
+
+    # Two concurrent awaiters: both must see the exception. The single-flight
+    # primary call propagates via raise; the awaiter receives via the Future.
+    with pytest.raises(RuntimeError, match="slow boom"):
+        await asyncio.gather(
+            cache.get_or_fetch(("k",), slow_boom),
+            cache.get_or_fetch(("k",), slow_boom),
+        )
+
+    # Fetcher invoked exactly once even though both raised.
+    assert calls == 1
