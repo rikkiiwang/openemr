@@ -122,6 +122,13 @@ class Settings(BaseSettings):
     # Empty string (default) preserves the legacy single-role behavior.
     copilot_front_desk_users: str = ""
 
+    # FHIR per-tenant cache (2026-05-10). When ttl_seconds > 0, FhirClient
+    # routes get_resource and search through TtlSingleFlightCache. Set to 0
+    # to disable (kill-switch). max_entries bounds memory; LRU evicts at
+    # the bound.
+    copilot_fhir_cache_ttl_seconds: int = 60
+    copilot_fhir_cache_max_entries: int = 1000
+
 
 @lru_cache
 def get_settings() -> Settings:
