@@ -45,9 +45,25 @@ class TtlSingleFlightCache:
                 return value
             del self._ttl[key]
 
-        result = await fetcher()
-        self._ttl[key] = (result, time.monotonic() + self._ttl_seconds)
-        self._ttl.move_to_end(key)
-        while len(self._ttl) > self._max_entries:
-            self._ttl.popitem(last=False)  # evict LRU (oldest)
-        return result
+        # Single-flight: piggyback on any in-flight fetch for the same key.
+        inflight = self._inflight.get(key)
+        if inflight is not None:
+            return await inflight
+
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        self._inflight[key] = future
+        try:
+            result = await fetcher()
+            self._ttl[key] = (result, time.monotonic() + self._ttl_seconds)
+            self._ttl.move_to_end(key)
+            while len(self._ttl) > self._max_entries:
+                self._ttl.popitem(last=False)  # evict LRU (oldest)
+            future.set_result(result)
+            return result
+        except Exception as e:
+            if not future.done():
+                future.set_exception(e)
+            raise
+        finally:
+            self._inflight.pop(key, None)

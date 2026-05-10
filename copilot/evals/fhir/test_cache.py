@@ -82,3 +82,27 @@ async def test_lru_evicts_oldest_when_bound_exceeded():
     assert calls["a"] == 2  # Fetched again after eviction.
     assert calls["b"] == 1
     assert calls["c"] == 1
+
+
+@pytest.mark.asyncio
+async def test_single_flight_concurrent_misses_share_one_fetch():
+    import asyncio
+
+    cache = TtlSingleFlightCache(ttl_seconds=60, max_entries=10)
+    calls = 0
+
+    async def slow_fetcher():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return {"shared": True}
+
+    # Two concurrent gets for the same key should share a single fetch.
+    a, b = await asyncio.gather(
+        cache.get_or_fetch(("k",), slow_fetcher),
+        cache.get_or_fetch(("k",), slow_fetcher),
+    )
+
+    assert a == {"shared": True}
+    assert b == {"shared": True}
+    assert calls == 1
