@@ -192,24 +192,41 @@ prek run --all-files        # run hooks (phpstan, rector, phpcs, codespell, ...)
 
 ## Deployment — Railway
 
-**Project:** `refreshing-empathy`. Four services since 2026-05-09:
+**Active project:** `refreshing-empathy`. Three services as of 2026-05-10 (down from four after the B14 v2 consolidation):
 
 | Service | URL | What it is |
 |---|---|---|
-| `openemr` | https://openemr-production-0c8c.up.railway.app/ | OpenEMR fork with `awk`-injected iframe rail (B8) + dashboard.php launcher injection (B14) |
+| `openemr` | https://openemr-production-0c8c.up.railway.app/ | OpenEMR fork (Apache + PHP-FPM at `/`) with `awk`-injected iframe rail (B8), dashboard.php chooser (B14), AND **co-resident Next.js dashboard at `/modern/*`** (multi-stage Dockerfile builds frontend → `/opt/dashboard`; `dashboard-proxy.conf` mod_proxy forwards `/modern` → 127.0.0.1:3000; entrypoint forks Node before Apache). Single container, two stacks. |
 | MySQL | (internal `*.railway.internal`) | OpenEMR DB |
-| `copilot` | https://copilot-production-b532.up.railway.app/ | FastAPI agent + standalone chat UI at `/` |
-| `dashboard` | (W2 surprise-challenge port; URL set as `DASHBOARD_URL` on the OpenEMR service) | Next.js 15 / React 19 modern patient dashboard at `frontend/`. Confidential OAuth2 client; FHIR proxy enforces panel scope server-side; embeds the Co-Pilot iframe rail. |
+| `copilot` | https://copilot-production-b532.up.railway.app/ | FastAPI agent + standalone chat UI at `/` (NOT `/iframe` — CopilotRail builds `${COPILOT_URL}/?...`) |
 
-- CI/CD: `.github/workflows/copilot-ci.yml` runs ruff + pytest on `copilot/**`; `.github/workflows/dashboard-ci.yml` runs lint + typecheck + vitest on `frontend/**`. Deploy job dropped (`f88ed610a`) — Railway native GitHub auto-deploy is the deploy path for all three deployable services.
-- TLS for OpenEMR: cert regenerated on every container boot via `railway-entrypoint.sh` (idempotent).
+**Decommissioned (paused as of 2026-05-10, slated for delete after demo):**
+
+| Project / Service | Status |
+|---|---|
+| `agentforge-dashboard / dashboard` | ⏸ Paused (revert window for B14 v1 → v2 pivot). Was previously the standalone Railway service serving the Next.js dashboard at `https://openemr-production-904a.up.railway.app/`. |
+
+- CI/CD: `.github/workflows/copilot-ci.yml` runs ruff + pytest on `copilot/**`; `.github/workflows/dashboard-ci.yml` runs lint + typecheck + vitest on `frontend/**`. Deploy job dropped (`f88ed610a`) — Railway native GitHub auto-deploy is the path for the two live deployables.
+- TLS for OpenEMR: cert regenerated on every container boot via `railway-entrypoint.sh` (idempotent). The same entrypoint also forks the Next.js Node process on 127.0.0.1:3000 before exec'ing Apache.
 
 ---
 
 ## Environment variables (names only — never values)
 
-OpenEMR side: standard upstream `.env` plus `DASHBOARD_URL` (when set, finder click 302s through `dashboard.php` to the modern dashboard; pattern B14). Copilot side (`copilot/.env`):
+After the B14 v2 consolidation (2026-05-10), the dashboard env vars live ON THE OPENEMR SERVICE — there is no separate dashboard service to set them on.
 
+**OpenEMR Railway service (`refreshing-empathy/openemr`):**
+- Standard upstream OpenEMR .env (MySQL connection, etc.)
+- Co-Pilot/dashboard gates: `COPILOT_ADMIN_USERS` (comma-separated login usernames; bypass list shared by `copilot-finder-scope.php`, `copilot-demographics-gate.php`, AND the dashboard's panel-scope gate)
+- Dashboard-needed-at-runtime (consumed by the co-resident Next.js process):
+  - OAuth client: `OPENEMR_DASHBOARD_CLIENT_ID`, `OPENEMR_DASHBOARD_CLIENT_SECRET`
+  - URLs: `DASHBOARD_PUBLIC_URL` (must end in `/modern`), `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `OPENEMR_VERIFY_TLS`
+  - Co-Pilot embed: `COPILOT_URL` (full https URL of copilot service; CopilotRail appends `/?patient_id=...`)
+  - Cookie signing: `SESSION_COOKIE_SECRET`
+  - Optional strict scope: `STRICT_PANEL_SCOPE` (when `true`, FHIR proxy denies on panel-scope misses; default is fall-through)
+- ❌ **Removed:** `DASHBOARD_URL` (was used by v1 chooser to absolute-link out to the separate dashboard service; v2 chooser uses relative `/modern/...`)
+
+**Copilot Railway service (`refreshing-empathy/copilot`, `copilot/.env`):**
 - LLM: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `LLM_PROVIDER`
 - OpenEMR: `OPENEMR_FHIR_BASE`, `OPENEMR_OAUTH_BASE`, `OPENEMR_VERIFY_TLS`, `OPENEMR_ADMIN_PASSWORD`
 - OAuth client: `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`
@@ -218,14 +235,7 @@ OpenEMR side: standard upstream `.env` plus `DASHBOARD_URL` (when set, finder cl
 - Observability: `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`
 - Eval/CI: `ANTHROPIC_LIVE`
 
-Dashboard side (`frontend/.env.local`):
-- OAuth client: `OPENEMR_DASHBOARD_CLIENT_ID`, `OPENEMR_DASHBOARD_CLIENT_SECRET`
-- URLs: `DASHBOARD_PUBLIC_URL`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `OPENEMR_VERIFY_TLS`
-- Co-Pilot embed: `COPILOT_URL`
-- Cookie signing: `SESSION_COOKIE_SECRET`
-- Optional strict scope: `STRICT_PANEL_SCOPE` (when `true`, FHIR proxy denies on panel-scope misses; default is mirror of Co-Pilot's empty-GP fall-through)
-
-`.env` files are gitignored. `.env.example` is the canonical reference.
+`.env` files are gitignored. `.env.example` is the canonical reference for both surfaces.
 
 ---
 

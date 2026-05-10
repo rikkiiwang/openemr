@@ -216,34 +216,51 @@ SQLite on Railway volume (`copilot/copilot_docs.db`); endpoints `/v1/sessions/{r
 
 `.github/workflows/copilot-ci.yml` runs ruff + pytest on `copilot/**`. Deploy job dropped (`f88ed610a`) — Railway native GitHub auto-deploy is the deploy mechanism. CI never makes real LLM calls (`evals/conftest.py` skips `@pytest.mark.live_llm` unless `ANTHROPIC_LIVE=1`).
 
-### B14. Modern Patient Dashboard ↔ OpenEMR integration via finder re-point + EHR-launch silent SSO
+### B14. Modern Patient Dashboard ↔ OpenEMR — same-origin co-resident container (v2, LIVE on master `7124c20dd`)
 
-**Added 2026-05-09.** The W2 surprise-challenge dashboard (Next.js 15 / React 19 at `frontend/`, deployed as a third Railway service) is reachable from inside OpenEMR via a patient-finder click — not as a parallel UI a clinician has to remember to navigate to.
+**Pattern shipped 2026-05-09 (v1 cross-origin), pivoted 2026-05-10 to v2 (same-origin co-resident).** The W2 surprise-challenge dashboard (Next.js 15 / React 19 at `frontend/`) is reachable from inside OpenEMR via a patient-finder click. v2 collapses the deployment from 3 Railway services to 2 by **co-hosting the Next.js process inside OpenEMR's Apache container** behind `mod_proxy_http`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist.
 
-**Why:** PRD's "feel connected to the authenticated OpenEMR patient context" requirement plus the practical observation that physicians click patient names from the finder dozens of times a session. A separately-hosted dashboard that requires re-login every click would never get used.
+**Why v2 (vs v1):** v1's cross-origin embed required SameSite=None + Secure cookies on both sides, a CSP frame-ancestors allowlist, and a hardcoded `PROD_OPENEMR_ORIGIN_FALLBACK` constant in `csp.ts` because `next.config.ts headers()` runs at build time and Railway runtime env vars don't reach it. Two days of fragility for a single demo. v2 deletes all of that surface — the dashboard now serves under `/modern/*` on OpenEMR's own origin.
 
-**Pattern (mirrors B8 — `awk`/`sed` injection into the upstream image, not COPY):**
+**Pattern (still mirrors B8 — `awk`/`sed` into upstream + multi-stage Dockerfile):**
 
 | Layer | File | Behavior |
 |---|---|---|
-| Launcher | `interface/patient_file/summary/dashboard.php` (`0a49d038d`) | Reads `set_pid`, looks up FHIR UUID via `UuidRegistry`, mints a `SMARTLaunchToken`, 302s to `${DASHBOARD_URL}/api/auth/login?next=/patient/<uuid>&launch=<token>`. Falls back to `demographics.php` transparently if `DASHBOARD_URL` is unset (no-op for environments not wired up). |
-| Finder re-point | `interface/main/finder/{dynamic_finder,patient_select}.php` (`0a49d038d`) | Click handlers swapped from `demographics.php?set_pid=` → `dashboard.php?set_pid=`. The other ~10 callers (admin pages, calendar, reminders, messages) are unchanged — they keep going to legacy demographics. |
-| Image build | `Dockerfile` (`4b9f181a2`) | `COPY` dashboard.php into `/tmp` then `cp` into image at canonical path; `sed -i` applies the finder swap to the upstream image's two finder PHP files. Build-time grep guards fail loudly if any `cp`/`sed` fell through. Necessary because the Railway image is `FROM openemr/openemr:latest` with surgical injections — local PHP edits don't reach the container. |
-| Silent SSO | `Dockerfile` `sed`-patch on `SessionConfigurationBuilder.php` (`ad40380f3`) | Flips default session cookie `samesite` from `Strict` → `Lax`. The upstream `OpenEMR` session cookie is needed cross-site when the dashboard bounces back to `/oauth2/default/authorize` — `Strict` blocks the OAuth GET; `Lax` allows top-level navigations. |
-| Token forwarding | dashboard `/api/auth/login` → OpenEMR `/oauth2/default/authorize` (`ad40380f3`) | The `launch=<token>` arg rides through the OAuth flow. OpenEMR resolves the SMARTLaunchToken back to the patient UUID, skipping login + consent if the upstream OpenEMR session is valid. |
-| Iframe embed | `frontend/` middleware/CSP (`a0fa9b252`, `99e738502`, `cf82f9592`) | Dashboard renders inside OpenEMR's main frame via CSP `frame-ancestors`; PKCE + session cookies use `SameSite=None; Secure` in prod for cross-site cookie permission. |
+| Build | `Dockerfile` stage `dashboard-build` (`81baf8186`) | `node:24-alpine` → `npm ci` + `npm run build` → produces `frontend/.next/standalone`. |
+| Image runtime | `Dockerfile` main stage (`81baf8186`) | `apk add nodejs` (Node 22); `COPY --from=dashboard-build /build/.next/standalone /opt/dashboard`; `COPY dashboard-proxy.conf /etc/apache2/conf.d/dashboard-proxy.conf`. |
+| Reverse proxy | `dashboard-proxy.conf` (`2cb818c43`) | `ProxyPass /modern http://127.0.0.1:3000/modern` (no trailing slash on either side, so `/modern`, `/modern/`, and `/modern/anything` all match). `mod_proxy_http` is preloaded by upstream `proxy.conf`. |
+| Process lifecycle | `railway-entrypoint.sh` (`81baf8186`) | Forks `node /opt/dashboard/server.js` on 127.0.0.1:3000 before `exec ./openemr.sh`; `trap` reaps Node on container shutdown. |
+| Next.js basePath | `frontend/next.config.ts` (`81baf8186`) | `basePath: "/modern"` + `assetPrefix: "/modern"`. Routes, assets, and API paths all serve under `/modern/*`. |
+| Launcher | `interface/patient_file/summary/dashboard.php` (`81baf8186`) | View chooser. Modern URL is **relative same-origin** `/modern/api/auth/login?next=/patient/<uuid>&launch=<token>`. No `DASHBOARD_URL` env read. Fallback to legacy fires only when patient lacks a UUID. |
+| Finder re-point | `interface/main/finder/{dynamic_finder,patient_select}.php` (`0a49d038d`, unchanged from v1) | Click handlers route to `dashboard.php?set_pid=`. |
+| Image-time injection | `Dockerfile` `cp`+`sed` (`4b9f181a2`, unchanged from v1; SameSite=None sed reverted in `81baf8186`) | Build-time grep guards still fail loudly if any injection drops out. |
+| OAuth callback Location | `frontend/app/api/auth/callback/route.ts` (`2cb818c43`) | Prepends `/modern` to the `next` path before setting `Location`. Without this, post-login redirect to `/patient/<uuid>` 404s at Apache (no proxy match). |
+| CSP at runtime | `frontend/middleware.ts` (`4ec0f07b0`) | Per-request middleware overrides `Content-Security-Policy` so runtime `COPILOT_URL` reaches `frame-src`. The static CSP from `next.config.ts headers()` is build-time-baked; middleware is the right tool for runtime-config-driven response headers. |
+| Iframe embed | same-origin (no allowlist needed) | CSP says `frame-ancestors 'self'`; X-Frame-Options `SAMEORIGIN`. OpenEMR (which iframes the chooser → modern dashboard) is the same origin as `/modern/*`. |
+| Co-Pilot rail src | `frontend/components/CopilotRail.tsx` (`7124c20dd`) | Builds `${COPILOT_URL}/?patient_id=...`. The deployed Co-Pilot serves the iframe shell at `/`, NOT `/iframe` (`copilot/app/main.py:117`). |
 
-**What this preserves:**
+**What this preserves (unchanged from v1):**
 
-- B8's `awk`/`sed`-into-upstream pattern is still the answer for any cross-cutting OpenEMR PHP edit. We never COPY `interface/` whole.
-- B6's three-layer scope is preserved in the new dashboard — its FHIR proxy enforces panel scope server-side (KR8 in `PATIENT_DASHBOARD_MIGRATION.md`).
-- B9's prompt cache is unchanged; the dashboard talks to the same Co-Pilot service via the embedded iframe (B6 / `copilot-rail-fragment.php`).
+- B8's `awk`/`sed`-into-upstream pattern is still the answer for cross-cutting OpenEMR PHP edits.
+- B6's three-layer scope is preserved in the dashboard — its FHIR proxy enforces panel scope server-side.
+- B9's prompt cache is unchanged; the dashboard embeds the same Co-Pilot service via iframe.
+- SMART EHR-launch silent SSO via `SMARTLaunchToken` (`ad40380f3`) still works through the OAuth flow.
 
-**What's new and load-bearing:**
+**What v2 obviates (vs v1):**
 
-- New env: `DASHBOARD_URL` on the OpenEMR service (presence enables the re-point), `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `DASHBOARD_PUBLIC_URL`, `OPENEMR_VERIFY_TLS`, `SESSION_COOKIE_SECRET` on the dashboard service.
-- Dashboard is a confidential OAuth2 client registered in OpenEMR Admin → System → API Clients with redirect_uri = `${DASHBOARD_PUBLIC_URL}/api/auth/callback`. Client must be permitted to mint scopes including `launch` (SMART EHR launch).
-- The `samesite=Lax` flip is global to the upstream OpenEMR install; if the upstream image ever stops being amenable to the `sed`, the build-time guard fails the deploy before users see broken auth.
+- CSP `frame-ancestors` allowlist — gone. `'self'` is enough.
+- `SameSite=None; Secure` cookies in prod — gone. `SameSite=Lax + Secure` works for the same-origin embed.
+- Upstream `SessionConfigurationBuilder.php` samesite-Lax flip (sed) — gone, reverted in `81baf8186`.
+- Separate `dashboard` Railway service — paused; deletable post-demo.
+- `DASHBOARD_URL` env on the OpenEMR service — gone, no longer read.
+- `PROD_OPENEMR_ORIGIN_FALLBACK` constant in `csp.ts` — gone (was the build-time-vs-runtime workaround for OPENEMR_OAUTH_BASE).
+
+**What's new and load-bearing in v2:**
+
+- Multi-process container — Apache (PID 1) + Node (background child). ~150MB extra memory, ~5–8s extra startup. Trap-on-exit reaps Node on container shutdown.
+- Single Railway service `refreshing-empathy/openemr` carries env vars previously split across two services: `OPENEMR_DASHBOARD_CLIENT_ID/SECRET`, `DASHBOARD_PUBLIC_URL=https://…0c8c…/modern`, `OPENEMR_OAUTH_BASE`, `OPENEMR_FHIR_BASE`, `SESSION_COOKIE_SECRET`, `COPILOT_URL`, `COPILOT_ADMIN_USERS`, `OPENEMR_VERIFY_TLS`, `STRICT_PANEL_SCOPE` (optional).
+- OAuth client `Dashboard (Next.js)` redirect_uri = `https://openemr-production-0c8c.up.railway.app/modern/api/auth/callback`. Client scopes must include all six `user/<Resource>.read` for the cards (Allergies, Condition, MedicationRequest, CareTeam, Encounter, Patient). The OpenEMR API-Clients form is brittle — the JWKS field validator rejects empty strings; workaround = type `[]` literally, or update via SQL on `oauth_clients`.
+- `COPILOT_ADMIN_USERS` env is shared between the Next.js panel-scope gate AND the legacy `copilot-finder-scope.php`/`copilot-demographics-gate.php` hand-rolled SQL filters. Front-desk users need their login username in this list for both layers to bypass.
 
 ---
 
