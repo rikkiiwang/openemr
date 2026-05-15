@@ -158,6 +158,44 @@ async def patient_raw(
     return JSONResponse(resource)
 
 
+@app.get("/v1/patients")
+async def list_patients(
+    physician_user_id: str | None = None,
+    limit: int = 20,
+    settings: Settings = Depends(get_settings),
+):
+    """List FHIR Patient UUIDs visible to the physician.
+
+    Returns only IDs (no PHI). Used by external tooling — notably the
+    AgentForge Adversarial harness — to auto-bootstrap a patient_id
+    without requiring an operator to copy a UUID out of the OpenEMR UI.
+    Honours ``PHYSICIAN_PATIENT_PANEL`` when set: the returned IDs are
+    intersected with the physician's panel list.
+    """
+    fhir: FhirClient = app.state.fhir
+    physician = physician_user_id or settings.demo_physician_user_id
+    bounded_limit = max(1, min(limit, 100))
+    try:
+        bundle = await fhir.search(
+            "Patient",
+            params={"_count": str(bounded_limit)},
+            physician_user_id=physician,
+        )
+    except FhirError as e:
+        raise HTTPException(status_code=e.status or 502, detail=str(e))
+    entries = (bundle or {}).get("entry") or []
+    ids: list[str] = []
+    for entry in entries:
+        pid = (entry.get("resource") or {}).get("id")
+        if isinstance(pid, str) and pid:
+            ids.append(pid)
+    panel = _env_panel_for(settings, physician)
+    if panel is not None:
+        panel_set = set(panel)
+        ids = [pid for pid in ids if pid in panel_set]
+    return {"patients": [{"id": pid} for pid in ids], "count": len(ids)}
+
+
 class StartSessionRequest(BaseModel):
     patient_id: str
     physician_user_id: str | None = None
