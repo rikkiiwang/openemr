@@ -97,7 +97,7 @@ Six roles: Administrators, Physicians, Clinicians, Front Office, Accounting, Eme
 
 | File | Responsibility |
 |---|---|
-| `copilot/app/main.py` | FastAPI entry, `/healthz`, `/v1/sessions`, `/v1/chat`, `/v1/patient/{id}/raw`, plus W2 documents endpoints |
+| `copilot/app/main.py` | FastAPI entry, `/healthz`, `/v1/sessions`, `/v1/chat`, `/v1/patient/{id}/raw`, `/v1/patients` (panel-aware UUID list — added 2026-05-15 for external auto-bootstrap, PR #6 → `34ae2d95f`), plus W2 documents endpoints |
 | `copilot/app/config.py` | Settings (env-driven via `pydantic-settings`) |
 | `copilot/app/fhir/oauth.py` | OAuth2 password-grant token acquisition |
 | `copilot/app/fhir/client.py` | httpx-based FHIR HTTP client with TLS toggle |

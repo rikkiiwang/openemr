@@ -1,6 +1,6 @@
 # Progress
 
-**Last reviewed:** 2026-05-10 (post-consolidation refresh — reconciles against master @ `7124c20dd` after the four squash-merges that landed B14 v2: PR #1 consolidate-dashboard, PR #2 callback basePath, PR #3 CSP middleware, PR #5 CopilotRail iframe path. Phase 5 v2 promoted from "in active iteration" to "shipped + verified". Also refreshes the Cross-week summary and Phase 5 sections accordingly.)
+**Last reviewed:** 2026-05-15 (W3 active in sibling repo, W2 closed, tonight's openemr-repo PRs added to "Post-W2 maintenance" section below).
 
 ---
 
@@ -9,8 +9,8 @@
 | Week | Window | State |
 |---|---|---|
 | Week 1 | 2026-04-21 → 2026-05-04 | ✅ Complete — all four checkpoints submitted, all AI Interviews completed (closed 2026-05-05) |
-| Week 2 | 2026-05-04 → 2026-05-10 | 🟢 Phases 1–5 fully shipped on master (`7124c20dd`); B14 v2 consolidation deployed + verified end-to-end on Sun 2026-05-10 ≈ 01:00 PT. Single Railway container now serves OpenEMR at `/` and the Next.js dashboard at `/modern/*` via Apache mod_proxy. The cross-origin v1 architecture is superseded; `agentforge-dashboard` Railway service is paused as the revert window. **186 dashboard tests / 53/53 eval cases.** Outstanding W2 Final items: 3-5 min demo video, real `POST /fhir/DocumentReference` (R4 has no route — Plan B REST path is OAuth-scope-blocked), dense retrieval (currently BM25 + identity-rerank). |
-| Week 3+ | TBD | 📋 Not started |
+| Week 2 | 2026-05-04 → 2026-05-10 | ✅ Phases 1–5 fully shipped on master (`7124c20dd`); B14 v2 consolidation deployed + verified end-to-end on Sun 2026-05-10 ≈ 01:00 PT. Single Railway container now serves OpenEMR at `/` and the Next.js dashboard at `/modern/*` via Apache mod_proxy. **186 dashboard tests / 53/53 eval cases.** Outstanding W2 Final items closed as defensible-as-shipped: dense retrieval added later via hybrid BM25 + OpenAI embeddings + RRF (master commit `62280bb1b`). |
+| Week 3 | 2026-05-11 → ongoing | 🟢 **Active in sibling repo** `~/Desktop/Gauntlet/agentforge-adversarial/`. The openemr-repo's role is as the **attack target** (the deployed Co-Pilot is what the adversarial harness probes). Day-to-day W3 development should happen in that repo. By 2026-05-15 the platform has closed all 7 architecture-fidelity gaps the MVP had — see `~/Desktop/Gauntlet/agentforge-adversarial/IMPLEMENTATION.md` for the up-to-date matrix. **126/126 tests pass** in that repo. |
 
 ---
 
@@ -471,10 +471,22 @@ All bug-class — none introduce new architectural surface beyond what Phases 1�
 
 ---
 
+## ✅ Post-W2 maintenance on this repo (2026-05-15)
+
+Two PRs merged tonight in service of the **W3 Adversarial Platform** that lives in the sibling repo. The platform attacks the deployed Co-Pilot at `copilot-production-b532.up.railway.app`, so its needs occasionally surface as openemr-side changes.
+
+- **`34ae2d95f` (PR #6)** — `feat(copilot): add GET /v1/patients for external auto-bootstrap`. New endpoint on `copilot/app/main.py` lists FHIR Patient UUIDs (IDs only, no PHI); honours `PHYSICIAN_PATIENT_PANEL`. Consumed by the adversarial harness to skip manual UUID copy-paste before launching a campaign. ~35 LOC + 5 new tests in `copilot/evals/agent/test_patient_list.py`.
+- **`304bc832d` (PR #7)** — `fix(railway): clear stale docker-leader marker on openemr boot`. **Incident hotfix:** the PR #6 merge triggered a Railway redeploy of the `openemr` service (the platform watches the whole repo, not subpaths). The new openemr container then crash-looped on `./openemr.sh: line 98: can't create … docker-leader: File exists` because the upstream openemr image leaves the marker file on the volume when ungracefully killed. One-line `rm -f` added to `railway-entrypoint.sh` before exec-ing `openemr.sh`. Service recovered ≈ 5 min after the new container started its first-boot `chown -R`.
+
+**Operational lesson:** Railway service watch-paths default to whole-repo. Filed as a follow-up — configure path filters on the openemr Railway service so `copilot/`-only changes don't redeploy it. Won't bite us again as soon as that's done.
+
+---
+
 ## 📋 Pending
 
 ### Week 3+
-- Assignment not yet released. When it lands, follow CLAUDE.md rule 2.
+- W3 is **active in the sibling repo** `~/Desktop/Gauntlet/agentforge-adversarial/`. Day-to-day development should happen in that repo. The 7 architecture-fidelity gaps the W3 MVP had left open were all closed in three tracks tonight (PRs #2/#3/#4 in that repo). 126/126 tests pass.
+- Railway path-filter on the openemr service (so a future copilot-only PR doesn't redeploy openemr; carried forward from tonight's incident).
 
 ### Open W2 questions
 - Confirm absolute deadline times against cohort calendar (PRD lists "Tuesday 11:59 PM" without dates; inferred dates are based on a Mon 2026-05-04 kickoff).

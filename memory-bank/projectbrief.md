@@ -104,7 +104,7 @@ Out of scope: nursing, billing, patient-portal, ED, cohort queries, order entry,
 | Week | Focus | Status |
 |---|---|---|
 | Week 1 (2026-04-21 → 2026-05-04) | Audit, design, single-agent loop, iframe rail, eval, observability, deploy | **Complete.** See `assignments/week1.md`. |
-| Week 2 | TBD — assignment not yet released | Pending |
-| Week 3+ | TBD per cohort | Not started |
+| Week 2 (2026-05-04 → 2026-05-10) | Multimodal Evidence Agent — vision, multi-agent, eval gate, dashboard port + consolidation | **Complete.** Single-container B14 v2 live on Railway; hybrid BM25 + dense retrieval shipped post-deadline. See `assignments/week2.md`. |
+| Week 3 (2026-05-11 → ongoing) | Adversarial AI Security Platform — attacks the deployed Co-Pilot | **Active in sibling repo** `~/Desktop/Gauntlet/agentforge-adversarial/`. The openemr-repo role is *attack target*, not host. See `assignments/week3.md`. |
 
 The Week 1 verification + citation contract is **preserved unchanged** through every later week. Anything that would break it does not ship.

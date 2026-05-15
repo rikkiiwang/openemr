@@ -1,10 +1,37 @@
 # Active Context
 
-**Last updated:** 2026-05-10 (consolidation v2 shipped + verified live. Master @ `7124c20dd` after four squash-merges:`81baf8186` consolidate-dashboard, `2cb818c43` callback basePath, `4ec0f07b0` CSP middleware, `7124c20dd` CopilotRail iframe path. The agentforge-dashboard Railway service is **paused** as the revert window; slated for delete after demo.)
+**Last updated:** 2026-05-15 (Week 3 active; Week 2 closed. Tonight's work split across two repos — openemr (2 PRs) and the **agentforge-adversarial sibling repo** at `~/Desktop/Gauntlet/agentforge-adversarial/` (4 PRs closing all 7 architecture gaps the MVP had left open).)
 
-## Where we are right now
+## Where we are right now (2026-05-15)
 
-**On master (`7124c20dd`) — B14 v2 LIVE:** the consolidated single-container architecture is deployed and end-to-end verified. The Next.js dashboard runs as a co-resident Node process inside OpenEMR's Apache container; mod_proxy forwards `/modern/*` → `127.0.0.1:3000`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist needed for the embed. Confirmed working in production:
+**Current focus:** Week 3 Adversarial AI Security Platform — work lives in the **sibling repo** `~/Desktop/Gauntlet/agentforge-adversarial/`, NOT in this openemr repo. The openemr repo is the *attack target* (the deployed Co-Pilot is hit by the adversarial harness). Day-to-day W3 development should happen in that repo, not here.
+
+**Cross-repo state:**
+- `openemr` master @ `304bc832d` after tonight's 2 merges.
+- `agentforge-adversarial` main @ `78a2449` after tonight's 4 merges.
+- Railway services `refreshing-empathy/openemr` + `refreshing-empathy/copilot` + `daring-vitality/agentforge-adversarial` all live and healthy.
+
+**Tonight's openemr-repo merges:**
+- `34ae2d95f` (PR #6) — `feat(copilot): add GET /v1/patients for external auto-bootstrap`. New endpoint on the Co-Pilot service that lists FHIR Patient UUIDs (IDs only, no PHI), honouring `PHYSICIAN_PATIENT_PANEL`. Consumed by the adversarial harness to skip manual UUID copy-paste.
+- `304bc832d` (PR #7) — `fix(railway): clear stale docker-leader marker on openemr boot`. **Incident hotfix:** merging PR #6 triggered an unintended `openemr`-service redeploy on Railway (the platform watches the whole repo, not subpaths). The new container crash-looped on `./openemr.sh: line 98: can't create … docker-leader: File exists` because the upstream openemr image leaves the marker file on the volume when killed ungracefully. Added a 1-line `rm -f` to `railway-entrypoint.sh` before exec-ing `openemr.sh`. Service recovered ~5 min after the new container started its first-boot `chown -R`.
+
+**Operational lesson for next time:** Railway service watch-paths are *whole-repo* by default. A `copilot/`-only PR can still redeploy the openemr service. To avoid this in future, configure path filters on the openemr Railway service so it only redeploys on `Dockerfile`, `interface/`, `railway-entrypoint.sh`, etc. Filed as a follow-up below.
+
+**What the agentforge-adversarial side did tonight** (recorded here only for cross-repo discoverability — full audit lives in that repo's `IMPLEMENTATION.md`):
+- PR #2: Track A — `feat: architecture-fidelity bundle` (Judge ≠ Red Team model family / `near_misses` lifecycle / `cross_regressions` detection / queue-backed regression). Closed 4 of the 7 deferred-architecture gaps.
+- PR #3: Track B — `feat: Orchestrator + synthesize_fn`. Advisory 5-signal cell scoring (coverage_gap · partial_rate · severity_baseline · staleness · diversity_score, weights 0.30/0.30/0.20/0.10/0.10) + the 6-stage synthesize pipeline (normalize → embed → dedup → novelty filter → weighted score → budget-capped greedy pick, K=10).
+- PR #4: Track C — `feat(observability): Langfuse traces + per-agent spans + per-LLM generations`. One trace per campaign on Langfuse Cloud; spans for orchestrator / mutator / synthesize / dispatch / judge / class_probe / partial_reentry; generations carry tokens-in/out + cost-USD.
+- **All 7 architecture gaps closed.** 126/126 tests pass. Defaults locked in commits, not arbitrary.
+
+**Follow-ups carried forward (not blockers, low urgency):**
+- Railway path-filter config on the openemr service (prevents another PR #6→#7 incident).
+- The openemr-repo memory bank does NOT mirror the agentforge-adversarial repo's design docs — for W3 design context, read that repo's `ARCHITECTURE.md` + `IMPLEMENTATION.md` directly.
+
+---
+
+## Prior update — Week 2 final state (2026-05-10)
+
+**On master (`7124c20dd` at end of W2; `304bc832d` after tonight's W3-cross-cutting PRs) — B14 v2 LIVE:** the consolidated single-container architecture is deployed and end-to-end verified. The Next.js dashboard runs as a co-resident Node process inside OpenEMR's Apache container; mod_proxy forwards `/modern/*` → `127.0.0.1:3000`. Same origin = same cookie jar, no SameSite=None gymnastics, no CSP frame-ancestors allowlist needed for the embed. Confirmed working in production:
 - `https://openemr-production-0c8c.up.railway.app/modern/api/health` returns 200 with clean headers (`frame-ancestors 'self'`, `x-frame-options: SAMEORIGIN`, `set-cookie SameSite=Lax + Secure`).
 - Modern click in patient finder → chooser → dashboard renders inside OpenEMR's frame at `…0c8c…/modern/patient/<uuid>`. URL bar stays on the OpenEMR origin throughout.
 - All 6 cards render (Encounters fixed by granting `user/Encounter.read` on the OAuth client — was previously missing).
