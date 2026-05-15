@@ -50,4 +50,18 @@ else
     echo "railway-entrypoint: WARN — /opt/dashboard/server.js missing; /modern/* will 502" >&2
 fi
 
+# Clean up a stale `docker-leader` marker left behind when Railway killed
+# the previous container ungracefully (no SIGTERM cleanup window). The
+# upstream openemr.sh uses this file on `/sites` (a persistent volume on
+# Railway) to coordinate leader/follower replicas; on an ungraceful
+# shutdown the file is left behind, and the next boot crashloops at
+# openemr.sh:98 with "can't create ... docker-leader: File exists". We
+# run single-replica on Railway, so there is no follower to confuse —
+# the stale marker is purely a startup hazard.
+LEADER_MARKER=/var/www/localhost/htdocs/openemr/sites/docker-leader
+if [ -f "$LEADER_MARKER" ]; then
+    rm -f "$LEADER_MARKER"
+    echo "railway-entrypoint: removed stale leader-lock at $LEADER_MARKER"
+fi
+
 exec ./openemr.sh "$@"
